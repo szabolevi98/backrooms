@@ -1150,6 +1150,7 @@ function updateMonsters(dt) {
 
     if (m.chasing) {
       // Egyenesen a játékos felé rohan — fal-ütközéssel
+      if (playerDist < 0.1) continue;
       const spd = CHASE_SPEED * dt / playerDist;
       const mx = m.mesh.position.x, mz = m.mesh.position.z;
       const nx = mx + pdx * spd, nz = mz + pdz * spd;
@@ -1362,7 +1363,7 @@ function loop() {
   camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
   updateLights();
-  if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); checkCamping(dt); }
+  if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); checkCamping(dt); if (!dead) checkDeath(); }
   else { updateMonsterAnims(); }
 
   if (dead && deathAnimStart !== null) {
