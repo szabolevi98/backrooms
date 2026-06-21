@@ -731,21 +731,6 @@ updateSettingsUI();
 
 document.addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyX' && started) {
-    const mesh = createBacteria(0x1144cc);
-    mesh.position.set(
-      camera.position.x + Math.sin(yaw) * -4,
-      0,
-      camera.position.z + Math.cos(yaw) * -4
-    );
-    scene.add(mesh);
-    monsters.push({ mesh,
-      cx: Math.round(mesh.position.x/CELL),
-      cz: Math.round(mesh.position.z/CELL),
-      tx: Math.round(mesh.position.x/CELL),
-      tz: Math.round(mesh.position.z/CELL),
-      speed: 1.2, waitT: 0, passive: true });
-  }
   if (e.code === 'KeyM' && window._audioOut) {
     muted = !muted;
     window._audioOut.gain.value = muted ? 0 : 0.8;
