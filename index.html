@@ -68,6 +68,22 @@ canvas { display: block; }
 }
 #overlay button:hover { background: #c8a83212; border-color: #c8a832aa; }
 #overlay button:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+#settings {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 14px; pointer-events: all;
+}
+.setting-row {
+  display: flex; align-items: center; gap: 10px;
+  color: rgba(200,168,50,0.6); font-size: 11px; letter-spacing: 3px;
+  cursor: pointer; user-select: none;
+}
+.setting-row:hover { color: rgba(200,168,50,0.9); }
+.setting-box {
+  width: 12px; height: 12px;
+  border: 1px solid rgba(200,168,50,0.5);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: #c8a832; flex-shrink: 0;
+}
 
 #progress-wrap {
   width: 260px; height: 2px;
@@ -199,6 +215,20 @@ canvas { display: block; }
   <div class="lvl">LEVEL  0  —  THE  LOBBY</div>
   <div class="desc">you noclipped out of reality</div>
   <button id="enter-btn">ENTER</button>
+  <div id="settings">
+    <label class="setting-row" id="set-sound">
+      <span class="setting-box" id="box-sound">✕</span>
+      SOUND  <span style="opacity:0.4;font-size:9px;letter-spacing:1px;margin-left:6px">[M]</span>
+    </label>
+    <label class="setting-row" id="set-vhs">
+      <span class="setting-box" id="box-vhs">✓</span>
+      VHS EFFECT  <span style="opacity:0.4;font-size:9px;letter-spacing:1px;margin-left:6px">[O]</span>
+    </label>
+    <label class="setting-row" id="set-fs">
+      <span class="setting-box" id="box-fs">✓</span>
+      FULLSCREEN
+    </label>
+  </div>
   <div id="progress-wrap"><div id="progress-bar"></div></div>
   <div id="progress-label">GENERATING…</div>
 </div>
@@ -256,7 +286,7 @@ canvas { display: block; }
 
 <div id="ui">
   <div id="crosshair"></div>
-  <div id="info">WASD · MOUSE = LOOK · ESC = PAUSE · M = MUTE · LEFT SHIFT = SPRINT</div>
+  <div id="info">WASD · MOUSE = LOOK · ESC = PAUSE · LEFT SHIFT = SPRINT</div>
 </div>
 <div id="stamina-wrap"><div id="stamina-fill"></div></div>
 
@@ -410,21 +440,23 @@ const maze     = new Level();
 // ═══════════════════════════════════════════════
 //  THREE.JS
 // ═══════════════════════════════════════════════
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.domElement.style.cssText = 'position:fixed;inset:0;z-index:1;';
+renderer.domElement.style.position = 'fixed';
+renderer.domElement.style.inset = '0';
+renderer.domElement.style.zIndex = '1';
 document.body.insertBefore(renderer.domElement, document.getElementById('ui'));
 
 const crtCanvas = document.getElementById('crt');
 const crtCtx    = crtCanvas.getContext('2d');
 
 const scene  = new THREE.Scene();
-scene.fog    = new THREE.FogExp2(0xc8a830, 0.038);
-scene.background = new THREE.Color(0xc8a830);
+scene.fog    = new THREE.FogExp2(0xd4bc3a, 0.024);   // sárga pára
+scene.background = new THREE.Color(0xd4bc3a);
 
-scene.add(new THREE.AmbientLight(0xffe8a0, 0.62));
-scene.add(new THREE.HemisphereLight(0xffe090, 0xc8a020, 0.30));
+scene.add(new THREE.AmbientLight(0xfff4d8, 0.50));
+scene.add(new THREE.HemisphereLight(0xfff6e0, 0xb8a860, 0.30));
 
 const camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.12, 160);
 camera.position.set(0, 1.72, 0);
@@ -438,11 +470,11 @@ window.addEventListener('resize', () => {
 // ═══════════════════════════════════════════════
 //  MATERIALS
 // ═══════════════════════════════════════════════
-const wallMat  = new THREE.MeshLambertMaterial({ color: 0xd4b84a });
-const floorMat = new THREE.MeshLambertMaterial({ color: 0x9a7c28 });
-const ceilMat  = new THREE.MeshLambertMaterial({ color: 0x6a5810 });
-const fixMat   = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const pillarMat = new THREE.MeshLambertMaterial({ color: 0xc8aa3a });
+const wallMat  = new THREE.MeshLambertMaterial({ color: 0xe3c733 }); // élénk sárga tapéta
+const floorMat = new THREE.MeshLambertMaterial({ color: 0xb89a30 }); // sárgás szőnyeg
+const ceilMat  = new THREE.MeshLambertMaterial({ color: 0x8a7420 }); // sötét sárgás plafon
+const fixMat   = new THREE.MeshBasicMaterial({ color: 0xffffff });   // vakító fehér fénypanel
+const pillarMat = new THREE.MeshLambertMaterial({ color: 0xddc040 });
 
 const CELL = 5.0;
 const H    = 2.85;
@@ -466,16 +498,33 @@ const wallVHalfGeo = new THREE.BoxGeometry(T, HH, W);
 const wallHTopGeo  = new THREE.BoxGeometry(W, HT, T);
 const wallVTopGeo  = new THREE.BoxGeometry(T, HT, W);
 
-const fixGeo    = new THREE.BoxGeometry(0.55, 0.06, 1.9);
+const fixGeo    = new THREE.BoxGeometry(1.7, 0.05, 1.7);  // négyzetes fénypanel
 const pillarGeo = new THREE.BoxGeometry(0.28, H, 0.28);
 
-// Rácsos point light-ok — ~11×11 = 121 db, nagy sugárral
-for (let x = -MAZE_R; x <= MAZE_R; x += 10)
-  for (let z = -MAZE_R; z <= MAZE_R; z += 10) {
-    const pl = new THREE.PointLight(0xfff0a0, 0.7, CELL * 12, 1.8);
-    pl.position.set(x * CELL, H - 0.2, z * CELL);
-    scene.add(pl);
-  }
+// Point light POOL — mobil WebGL nem bír sok dinamikus fényt a Lambert
+// shaderben (uniform-limit), ezért csak pár fény van, ami a játékos köré
+// ugrik. A fény-rács 10 cellánként van (world: 10*CELL).
+const LIGHT_STEP = 6;                  // rács sűrűség cellában
+const LIGHT_POOL = [];
+const LIGHT_POOL_R = 1;                // játékos körüli rács-sugár (3×3 = 9 fény)
+for (let i = 0; i < (LIGHT_POOL_R * 2 + 1) ** 2; i++) {
+  const pl = new THREE.PointLight(0xfff4d0, 0.3, CELL * 12, 2.2);
+  pl.position.set(0, H - 0.2, 0);
+  scene.add(pl);
+  LIGHT_POOL.push(pl);
+}
+
+function updateLights() {
+  // legközelebbi rácspont a játékos alatt (rács maze-coordban LIGHT_STEP-enként)
+  const gx = Math.round(camera.position.x / CELL / LIGHT_STEP) * LIGHT_STEP;
+  const gz = Math.round(camera.position.z / CELL / LIGHT_STEP) * LIGHT_STEP;
+  let k = 0;
+  for (let dx = -LIGHT_POOL_R; dx <= LIGHT_POOL_R; dx++)
+    for (let dz = -LIGHT_POOL_R; dz <= LIGHT_POOL_R; dz++) {
+      const pl = LIGHT_POOL[k++];
+      pl.position.set((gx + dx * LIGHT_STEP) * CELL, H - 0.2, (gz + dz * LIGHT_STEP) * CELL);
+    }
+}
 
 // ═══════════════════════════════════════════════
 //  LIGHT PLACEMENT RNG
@@ -652,6 +701,33 @@ function canMove(nx, nz) {
 // ═══════════════════════════════════════════════
 const keys = {};
 let muted = localStorage.getItem('backrooms_muted') === '1';
+let vhsEnabled = localStorage.getItem('backrooms_vhs') !== '0';
+let fsEnabled = localStorage.getItem('backrooms_fs') !== '0';
+
+// — settings UI —
+function updateSettingsUI() {
+  document.getElementById('box-sound').textContent = muted ? '✕' : '✓';
+  document.getElementById('box-vhs').textContent   = vhsEnabled ? '✓' : '✕';
+  document.getElementById('box-fs').textContent    = fsEnabled  ? '✓' : '✕';
+}
+document.getElementById('set-sound').addEventListener('click', () => {
+  muted = !muted;
+  localStorage.setItem('backrooms_muted', muted ? '1' : '0');
+  if (window._audioOut) window._audioOut.gain.value = muted ? 0 : 0.8;
+  updateSettingsUI();
+});
+document.getElementById('set-vhs').addEventListener('click', () => {
+  vhsEnabled = !vhsEnabled;
+  localStorage.setItem('backrooms_vhs', vhsEnabled ? '1' : '0');
+  if (!vhsEnabled) crtCtx.clearRect(0, 0, crtCanvas.width, crtCanvas.height);
+  updateSettingsUI();
+});
+document.getElementById('set-fs').addEventListener('click', () => {
+  fsEnabled = !fsEnabled;
+  localStorage.setItem('backrooms_fs', fsEnabled ? '1' : '0');
+  updateSettingsUI();
+});
+updateSettingsUI();
 
 document.addEventListener('keydown', e => {
   keys[e.code] = true;
@@ -674,6 +750,13 @@ document.addEventListener('keydown', e => {
     muted = !muted;
     window._audioOut.gain.value = muted ? 0 : 0.8;
     localStorage.setItem('backrooms_muted', muted ? '1' : '0');
+    updateSettingsUI();
+  }
+  if (e.code === 'KeyO') {
+    vhsEnabled = !vhsEnabled;
+    localStorage.setItem('backrooms_vhs', vhsEnabled ? '1' : '0');
+    if (!vhsEnabled) crtCtx.clearRect(0, 0, crtCanvas.width, crtCanvas.height);
+    updateSettingsUI();
   }
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
@@ -781,9 +864,16 @@ document.addEventListener('keydown', e => {
     else        { showPause(false); document.getElementById('click-catcher').requestPointerLock(); }
   }
 });
+let pausedAt = null;
 function showPause(on) {
   paused = on;
   document.getElementById('pause').className = on ? 'show' : '';
+  if (on) {
+    pausedAt = performance.now();
+  } else if (pausedAt !== null && timerStart !== null) {
+    timerStart += performance.now() - pausedAt;
+    pausedAt = null;
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -833,6 +923,15 @@ const progressBar  = document.getElementById('progress-bar');
 const progressLbl  = document.getElementById('progress-label');
 
 enterBtn.addEventListener('click', async () => {
+  if (fsEnabled) {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    // mobilon landscape lock
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {});
+    }
+  }
   initAudio();
   enterBtn.disabled = true;
   progressWrap.style.display = 'block';
@@ -964,7 +1063,7 @@ function spawnMonsters() {
   }
 }
 
-const DETECT_DIST = 18; // ennyi world unit-on belül meglát
+const DETECT_DIST = 27; // ennyi world unit-on belül meglát
 const CHASE_SPEED = 5.5;
 const WANDER_SPEED = 0.9;
 
@@ -1131,9 +1230,9 @@ const fwd   = new THREE.Vector3();
 const right = new THREE.Vector3();
 const SPEED = 4.0;
 const SPRINT_SPEED = 7.5;
-const STAMINA_MAX  = 15.0; // 15mp sprint
+const STAMINA_MAX  = 10.0; // 10mp sprint
 const STAMINA_DRAIN = 1.0; // 1mp/mp fogyás sprint közben
-const STAMINA_REGEN = 0.5; // 0.5mp/mp töltés → 30mp pihi
+const STAMINA_REGEN = 0.25; // 0.25mp/mp töltés → 40mp pihi
 let stamina = STAMINA_MAX;
 const deathMonsterPos = new THREE.Vector3();
 let deathAnimStart = null;
@@ -1196,6 +1295,7 @@ function loop() {
 
   camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
+  updateLights();
   if (!dead) { updateMonsters(dt); checkDeath(); }
   else { updateMonsterAnims(); }
 
@@ -1235,7 +1335,8 @@ function loop() {
     timerEl.textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   }
   renderer.render(scene, camera);
-  drawCRT(now);
+  if (vhsEnabled) drawCRT(now);
+  else crtCtx.clearRect(0, 0, crtCanvas.width, crtCanvas.height);
 }
 
 // ═══════════════════════════════════════════════
@@ -1252,6 +1353,31 @@ resizeCRT();
 window.addEventListener('resize', resizeCRT);
 
 let flickerVal = 1.0;
+
+// — Előre renderelt grain-csempék (teljesítmény) —
+const GRAIN_TILES = [];
+const GT_SIZE = 256;
+for (let t = 0; t < 8; t++) {
+  const c = document.createElement('canvas');
+  c.width = GT_SIZE; c.height = GT_SIZE;
+  const cx = c.getContext('2d');
+  const img = cx.createImageData(GT_SIZE, GT_SIZE);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = Math.random();
+    if (r < 0.62) { d[i+3] = 0; continue; }       // ritka: átlátszó
+    if (r < 0.82) {                                // világos szemcse
+      d[i] = 255; d[i+1] = 240; d[i+2] = 160; d[i+3] = (Math.random()*70 + 20) | 0;
+    } else if (r < 0.93) {                         // sötét szemcse
+      d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = (Math.random()*60 + 20) | 0;
+    } else {                                       // chroma-zaj
+      d[i] = (Math.random()*255)|0; d[i+1] = (Math.random()*255)|0; d[i+2] = (Math.random()*255)|0;
+      d[i+3] = (Math.random()*40 + 12) | 0;
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  GRAIN_TILES.push(crtCtx.createPattern(c, 'repeat'));
+}
 
 function drawCRT(now) {
   const W = crtCanvas.width, H = crtCanvas.height;
@@ -1292,30 +1418,60 @@ function drawCRT(now) {
   ctx.fillRect(0, rollY - 24, W, 48);
 
   // — vignette —
-  const vg = ctx.createRadialGradient(W/2, H/2, H * 0.28, W/2, H/2, H * 0.84);
+  const vg = ctx.createRadialGradient(W/2, H/2, H * 0.32, W/2, H/2, H * 0.88);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.65)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.42)');
   ctx.fillStyle = vg;
   ctx.fillRect(0, 0, W, H);
 
-  // — film grain —
-  const gCount = (W * H * 0.004) | 0;
-  for (let i = 0; i < gCount; i++) {
-    const gx = (Math.random() * W) | 0;
-    const gy = (Math.random() * H) | 0;
-    const ga = Math.random() * 0.22 + 0.03;
-    ctx.fillStyle = `rgba(255,240,160,${ga})`;
-    ctx.fillRect(gx, gy, 1, 1);
+  // — film grain (előre renderelt csempe, mozgó eltolással) —
+  const pat = GRAIN_TILES[((now * 0.06) | 0) % GRAIN_TILES.length];
+  if (pat) {
+    const ox = (Math.random() * GT_SIZE) | 0;
+    const oy = (Math.random() * GT_SIZE) | 0;
+    ctx.save();
+    ctx.translate(-ox, -oy);
+    ctx.fillStyle = pat;
+    ctx.fillRect(ox, oy, W, H);
+    ctx.restore();
   }
 
-  // — occasional horizontal sync glitch —
-  if (Math.random() < 0.025) {
+  // — folyamatos finom vízszintes tracking sávok alul —
+  const trackBase = H * 0.82;
+  for (let i = 0; i < 8; i++) {
+    const ty = trackBase + Math.random() * (H * 0.18);
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.06})`;
+    ctx.fillRect(0, ty | 0, W, 1);
+  }
+
+  // — gyakori vízszintes sync glitch (színes tear) —
+  if (Math.random() < 0.06) {
     const gy = (Math.random() * H) | 0;
-    const gh = (Math.random() * 3 + 1) | 0;
-    const gshift = (Math.random() * 12 - 6) | 0;
-    ctx.drawImage(glCanvas, gshift, gy, W, gh, 0, gy, W, gh);
-    ctx.fillStyle = `rgba(200,168,50,${Math.random() * 0.08 + 0.02})`;
+    const gh = (Math.random() * 6 + 2) | 0;
+    // RGB szétcsúszás imitáció: piros + cián sáv
+    ctx.fillStyle = `rgba(255,40,40,${Math.random() * 0.12 + 0.05})`;
     ctx.fillRect(0, gy, W, gh);
+    ctx.fillStyle = `rgba(40,255,255,${Math.random() * 0.10 + 0.04})`;
+    ctx.fillRect(0, gy + gh, W, gh);
+    // fehér kiégés
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.10})`;
+    ctx.fillRect(0, gy, W, 1);
+  }
+
+  // — ritka erős glitch-burst: több eltolt blokk —
+  if (Math.random() < 0.012) {
+    const blocks = (Math.random() * 5 + 3) | 0;
+    for (let i = 0; i < blocks; i++) {
+      const by = (Math.random() * H) | 0;
+      const bh = (Math.random() * 22 + 4) | 0;
+      const bx = (Math.random() * W * 0.4) | 0;
+      const bw = (Math.random() * W * 0.6 + W * 0.2) | 0;
+      ctx.fillStyle = `rgba(${(Math.random()*255)|0},${(Math.random()*255)|0},${(Math.random()*255)|0},${Math.random() * 0.20 + 0.06})`;
+      ctx.fillRect(bx, by, bw, bh);
+    }
+    // teljes képernyős villanás
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.08})`;
+    ctx.fillRect(0, 0, W, H);
   }
 }
 </script>
