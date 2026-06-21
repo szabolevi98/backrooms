@@ -911,6 +911,83 @@ function initAudio() {
   }
   setTimeout(tick, 1500);
 
+  // — torzítási görbe (waveshaper) —
+  function makeDistCurve(amount) {
+    const n = 256, curve = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      curve[i] = ((3 + amount) * x * 20 * Math.PI / 180) / (Math.PI + amount * Math.abs(x));
+    }
+    return curve;
+  }
+
+  // — CHASE STING: brutális torz horror-csapás —
+  window.playChaseSting = function () {
+    const t = ac.currentTime;
+    const shaper = ac.createWaveShaper();
+    shaper.curve = makeDistCurve(600); // erős torzítás
+    const g = ac.createGain();
+    shaper.connect(g); g.connect(out);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.8, t + 0.005); // nagyon éles attack
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+    // disszonáns klaszter + mély agresszív alap
+    const freqs = [110, 220, 880, 932, 1245, 1864];
+    for (const f of freqs) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 1.05, t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.58, t + 0.8); // lefelé rántás
+      o.detune.value = Math.random() * 50 - 25;
+      o.connect(shaper); o.start(t); o.stop(t + 0.84);
+    }
+    // becsapódó zaj-burst az elején
+    const buf = ac.createBuffer(1, (ac.sampleRate * 0.25) | 0, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const nb = ac.createBufferSource(); nb.buffer = buf;
+    const ng = ac.createGain();
+    ng.gain.setValueAtTime(0.5, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    nb.connect(shaper); nb.start(t);
+  };
+
+  // — DEATH SCREECH: brutális, hosszú torz fémes sikoly —
+  window.playDeathScreech = function () {
+    const t = ac.currentTime;
+    const DUR = 2.6; // hosszabb
+    const shaper = ac.createWaveShaper();
+    shaper.curve = makeDistCurve(1400); // még erősebb torzítás
+    const g = ac.createGain();
+    shaper.connect(g); g.connect(out);
+    g.gain.setValueAtTime(0.95, t);
+    g.gain.setValueAtTime(0.95, t + DUR * 0.55); // tartja, majd lecseng
+    g.gain.exponentialRampToValueAtTime(0.0001, t + DUR);
+    // mély guttural + magas sikoly réteg
+    const freqs = [41, 55, 110, 330, 420, 620, 660, 990, 1320];
+    for (const f of freqs) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * (0.95 + Math.random() * 0.1), t);
+      o.frequency.exponentialRampToValueAtTime(f * 0.22, t + DUR * 0.9);
+      const lfo = ac.createOscillator(), lfoG = ac.createGain();
+      lfo.frequency.value = 24 + Math.random() * 26; // durva, gyors vibrato
+      lfoG.gain.value = 90;
+      lfo.connect(lfoG); lfoG.connect(o.frequency);
+      lfo.start(t); lfo.stop(t + DUR);
+      o.connect(shaper); o.start(t); o.stop(t + DUR);
+    }
+    // erős, hosszú fehérzaj-burst
+    const buf = ac.createBuffer(1, (ac.sampleRate * DUR) | 0, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const nb = ac.createBufferSource(); nb.buffer = buf;
+    const ng = ac.createGain();
+    ng.gain.setValueAtTime(0.6, t);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + DUR * 0.7);
+    nb.connect(shaper); nb.start(t);
+  };
+
   window._audioOut = out;
 }
 
@@ -1053,6 +1130,7 @@ function spawnMonsters() {
   const far = rooms.filter(r => Math.abs(r.cx) + Math.abs(r.cz) > 8);
   const rm = far[Math.floor(Math.random() * far.length)] || rooms[1];
   spawnOneMonster(rm.cx, rm.cz, false);
+  respawnCooldown = 15.0; // játék indítása után 15mp-ig ne találkozz a szörnnyel
 }
 
 function checkRespawn(dt) {
@@ -1095,6 +1173,47 @@ function checkRespawn(dt) {
 const DETECT_DIST = 27; // ennyi world unit-on belül meglát
 const CHASE_SPEED = 7.15;
 const WANDER_SPEED = 1.17;
+const GIVE_UP_TIME = 4.5; // ennyi mp-ig keresi az eltűnt játékost, aztán feladja
+
+// ── BFS útkeresés a labirintus celláin keresztül ──
+// Visszaad egy [[x,z], ...] cella-listát a startból a célba (start nélkül),
+// vagy null-t ha nincs út. A nyílásokon (fal nélkül) halad át.
+function findPath(sx, sz, tx, tz, maxNodes = 1200) {
+  if (sx === tx && sz === tz) return [];
+  const key  = (x, z) => x + ',' + z;
+  const seen = new Set([key(sx, sz)]);
+  const prev = new Map();
+  const queue = [[sx, sz]];
+  let qi = 0, found = false;
+  while (qi < queue.length && qi < maxNodes) {
+    const [cx, cz] = queue[qi++];
+    if (cx === tx && cz === tz) { found = true; break; }
+    const w = maze.walls(cx, cz);
+    const nbrs = [];
+    if (!w.n) nbrs.push([cx, cz - 1]);
+    if (!w.s) nbrs.push([cx, cz + 1]);
+    if (!w.e) nbrs.push([cx + 1, cz]);
+    if (!w.w) nbrs.push([cx - 1, cz]);
+    for (const [nx, nz] of nbrs) {
+      const k = key(nx, nz);
+      if (seen.has(k) || !maze._get(nx, nz)) continue;
+      seen.add(k);
+      prev.set(k, [cx, cz]);
+      queue.push([nx, nz]);
+    }
+  }
+  if (!found) return null;
+  const path = [];
+  let cur = [tx, tz];
+  while (!(cur[0] === sx && cur[1] === sz)) {
+    path.push(cur);
+    const p = prev.get(key(cur[0], cur[1]));
+    if (!p) break;
+    cur = p;
+  }
+  path.reverse();
+  return path;
+}
 
 function updateMonsters(dt) {
   for (const m of monsters) {
@@ -1102,10 +1221,46 @@ function updateMonsters(dt) {
     const pdz = camera.position.z - m.mesh.position.z;
     const playerDist = Math.sqrt(pdx*pdx + pdz*pdz);
 
-    {
-      if (playerDist < DETECT_DIST) m.chasing = true;
-      if (playerDist > DETECT_DIST * 2) m.chasing = false;
+    // Van-e tiszta rálátás a játékosra?
+    const los = playerDist < DETECT_DIST * 2 &&
+      hasLineOfSight(m.mesh.position.x, m.mesh.position.z, camera.position.x, camera.position.z);
+
+    // Üldözés indítása: csak ha LÁTJA a játékost a detektálási távon belül
+    if (los && playerDist < DETECT_DIST) m.chasing = true;
+
+    if (m.chasing) {
+      // Ha valahogy rálátás nélkül indult üldözés (respawn/camp), inicializáljuk
+      if (m.lastSeenX === undefined) {
+        m.lastSeenX = camera.position.x;
+        m.lastSeenZ = camera.position.z;
+      }
+      if (los) {
+        // Látja → frissíti az utolsó ismert pozíciót, nullázza a felejtést
+        m.lostTimer = 0;
+        m.lastSeenX = camera.position.x;
+        m.lastSeenZ = camera.position.z;
+      } else {
+        // Nem látja → felejtő időzítő ketyeg
+        m.lostTimer = (m.lostTimer || 0) + dt;
+        if (m.lostTimer > GIVE_UP_TIME) {
+          m.chasing = false;   // feladja, bolyongani kezd
+          m.path = null;
+        }
+      }
     }
+
+    // Chase sting: amikor most kezd üldözni (false→true átmenet) + néha közben
+    if (m.chasing && !m._wasChasing && window.playChaseSting) {
+      window.playChaseSting();
+      m.stingTimer = 5 + Math.random() * 5; // következő 5-10mp múlva
+    } else if (m.chasing && window.playChaseSting) {
+      m.stingTimer = (m.stingTimer || 6) - dt;
+      if (m.stingTimer <= 0) {
+        window.playChaseSting();
+        m.stingTimer = 5 + Math.random() * 5;
+      }
+    }
+    m._wasChasing = m.chasing;
 
     // Testrész animáció
     const a = m.mesh.userData.anim;
@@ -1149,17 +1304,64 @@ function updateMonsters(dt) {
     }
 
     if (m.chasing) {
-      // Egyenesen a játékos felé rohan — fal-ütközéssel
       if (playerDist < 0.1) continue;
-      const spd = CHASE_SPEED * dt / playerDist;
       const mx = m.mesh.position.x, mz = m.mesh.position.z;
-      const nx = mx + pdx * spd, nz = mz + pdz * spd;
+      const step = CHASE_SPEED * dt;
+
+      // Cél: ha látja → a játékos; ha nem → az utolsó ismert pozíció
+      const tgtX = los ? camera.position.x : m.lastSeenX;
+      const tgtZ = los ? camera.position.z : m.lastSeenZ;
+
+      let dirX, dirZ;
+      if (los) {
+        // Tiszta rálátás → egyenesen rárohan
+        dirX = pdx / playerDist;
+        dirZ = pdz / playerDist;
+        m.path = null;
+      } else {
+        // Nem látja → BFS az utolsó ismert pozícióhoz
+        const tdx = tgtX - mx, tdz = tgtZ - mz;
+        const tdist = Math.sqrt(tdx*tdx + tdz*tdz);
+        // Ha elérte az utolsó ismert helyet és még mindig nem lát → feladja
+        if (tdist < 1.5) { m.chasing = false; m.path = null; continue; }
+
+        const mcx = Math.round(mx / CELL), mcz = Math.round(mz / CELL);
+        const pcx = Math.round(tgtX / CELL);
+        const pcz = Math.round(tgtZ / CELL);
+
+        m.pathTimer = (m.pathTimer || 0) - dt;
+        if (!m.path || m.path.length === 0 || m.pathTimer <= 0 ||
+            m.pathTargetCx !== pcx || m.pathTargetCz !== pcz) {
+          m.path = findPath(mcx, mcz, pcx, pcz);
+          m.pathTargetCx = pcx; m.pathTargetCz = pcz;
+          m.pathTimer = 0.35;
+        }
+
+        if (m.path && m.path.length) {
+          let wp = m.path[0];
+          let wdx = wp[0] * CELL - mx, wdz = wp[1] * CELL - mz;
+          let wd  = Math.sqrt(wdx*wdx + wdz*wdz);
+          if (wd < 0.7 && m.path.length > 1) {
+            m.path.shift();
+            wp = m.path[0];
+            wdx = wp[0] * CELL - mx; wdz = wp[1] * CELL - mz;
+            wd  = Math.sqrt(wdx*wdx + wdz*wdz);
+          }
+          wd = wd || 1;
+          dirX = wdx / wd;
+          dirZ = wdz / wd;
+        } else {
+          dirX = tdx / (tdist || 1);
+          dirZ = tdz / (tdist || 1);
+        }
+      }
+
+      const nx = mx + dirX * step, nz = mz + dirZ * step;
       const moveX = canMove(nx, mz, 1.1);
       const moveZ = canMove(mx, nz, 1.1);
       if (moveX) m.mesh.position.x = nx;
       if (moveZ) m.mesh.position.z = nz;
-      // Ha mindkét irányban blokkolva: próbálj csúszni az elérhető tengelyen
-      m.mesh.rotation.y = Math.atan2(pdx, pdz);
+      m.mesh.rotation.y = Math.atan2(dirX, dirZ);
       m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.012)) * 0.12;
     } else {
       // Bolyongás
@@ -1237,6 +1439,7 @@ function checkDeath() {
     if (dx*dx + dz*dz < 2.8*2.8) {
       if (!hasLineOfSight(m.mesh.position.x, m.mesh.position.z, camera.position.x, camera.position.z)) continue;
       dead = true;
+      if (window.playDeathScreech) window.playDeathScreech();
       deathMonsterPos.set(m.mesh.position.x, m.mesh.position.y, m.mesh.position.z);
       deathAnimStart = performance.now();
       if (timerStart !== null) {
