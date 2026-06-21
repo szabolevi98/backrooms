@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Backrooms – Level 0</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: monospace; }
+canvas { display: block; }
+
+#ui { position: fixed; inset: 0; pointer-events: none; }
+#crosshair {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  width: 5px; height: 5px;
+  border: 1px solid rgba(255,240,180,0.3);
+  border-radius: 50%;
+}
+#topleft {
+  position: fixed; top: 18px; left: 22px;
+  display: flex; flex-direction: column;
+}
+#level-tag {
+  color: rgba(220,195,90,0.85); font-size: 12px; letter-spacing: 3px;
+  text-shadow: 0 0 12px rgba(180,140,0,0.6);
+  background: rgba(0,0,0,0.25);
+  padding: 5px 14px;
+  display: inline-block;
+  width: fit-content;
+}
+#timer {
+  color: rgba(220,195,90,0.7); font-size: 10px; letter-spacing: 2px;
+  background: rgba(0,0,0,0.25);
+  padding: 4px 14px;
+  display: inline-block;
+  width: fit-content;
+}
+#info {
+  position: absolute; bottom: 22px; left: 50%;
+  transform: translateX(-50%);
+  color: rgba(220,195,90,0.8); font-size: 11px; letter-spacing: 3px;
+  white-space: nowrap;
+  text-shadow: 0 0 10px rgba(180,140,0,0.5);
+  background: rgba(0,0,0,0.25);
+  padding: 4px 14px; border-radius: 2px;
+}
+
+#overlay {
+  position: fixed; inset: 0; background: #0d0900;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; z-index: 100;
+}
+#overlay h1 {
+  color: #c8a832; font-size: 52px;
+  letter-spacing: 10px; text-transform: uppercase;
+  text-shadow: 0 0 60px #c8a83255;
+}
+#overlay .lvl  { color: #5a4010; font-size: 13px; letter-spacing: 5px; }
+#overlay .desc { color: #2e1f02; font-size: 11px; margin-top: 4px; letter-spacing: 2px; }
+#overlay button {
+  margin-top: 18px; background: none;
+  border: 1px solid #c8a83250; color: #c8a832;
+  padding: 11px 44px; font-family: monospace;
+  font-size: 13px; letter-spacing: 5px; cursor: pointer;
+  transition: all .25s; pointer-events: all;
+}
+#overlay button:hover { background: #c8a83212; border-color: #c8a832aa; }
+#overlay button:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+
+#progress-wrap {
+  width: 260px; height: 2px;
+  background: rgba(180,155,60,0.12);
+  margin-top: 6px; display: none;
+}
+#progress-bar {
+  height: 100%; width: 0%;
+  background: #c8a832;
+}
+#progress-label {
+  color: rgba(180,155,60,0.35);
+  font-size: 10px; letter-spacing: 3px;
+  margin-top: 8px; display: none;
+}
+
+#pause {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+  display: none; align-items: center; justify-content: center;
+  z-index: 200; cursor: pointer;
+}
+#pause.show { display: flex; }
+#pause p { color: #c8a832; font-size: 16px; letter-spacing: 6px; }
+
+#dead {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.92);
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 24px; z-index: 300;
+}
+#dead.show { display: flex; }
+#dead h2 {
+  color: #cc1100; font-size: 52px;
+  letter-spacing: 10px; text-transform: uppercase;
+  text-shadow: 0 0 40px #cc110088;
+}
+#dead .survived {
+  color: rgba(200,90,70,0.7); font-size: 13px; letter-spacing: 4px;
+}
+#dead button {
+  background: none; border: 1px solid #cc110055;
+  color: #cc1100; font-family: monospace;
+  font-size: 13px; letter-spacing: 5px;
+  padding: 10px 40px; cursor: pointer; transition: all .25s;
+}
+#dead button:hover { background: #cc110015; border-color: #cc1100; }
+
+/* ── Mobil responsive ── */
+@media (max-width: 600px) {
+  #overlay h1       { font-size: 9vw; letter-spacing: 4vw; }
+  #overlay .lvl     { font-size: 3.2vw; letter-spacing: 2vw; }
+  #overlay .desc    { font-size: 2.8vw; }
+  #overlay button   { font-size: 3.5vw; letter-spacing: 2vw; padding: 3.5vw 10vw; }
+  #level-tag        { font-size: 3vw; letter-spacing: 1.5vw; padding: 3px 10px; }
+  #timer            { font-size: 2.6vw; letter-spacing: 1vw; padding: 3px 10px; }
+  #info             { display: none; }
+  #dead h2          { font-size: 8vw; letter-spacing: 1vw; white-space: nowrap; }
+  #dead .survived   { font-size: 3.5vw; letter-spacing: 2vw; }
+  #dead button      { font-size: 3.5vw; letter-spacing: 2vw; padding: 3vw 9vw; }
+  #stamina-wrap     { bottom: 44px; width: 50vw; }
+  #progress-wrap    { width: 60vw; }
+  #progress-label   { font-size: 2.8vw; letter-spacing: 1.5vw; }
+}
+
+/* ── Stamina sáv ── */
+#stamina-wrap {
+  position: fixed; bottom: 52px; left: 50%;
+  transform: translateX(-50%);
+  width: 160px; height: 3px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px; pointer-events: none; z-index: 10;
+}
+#stamina-fill {
+  height: 100%; width: 100%; border-radius: 2px;
+  background: rgba(200,168,50,0.75);
+  transition: background 0.3s;
+}
+
+/* ── Mobil UI ── */
+#mobile-ui { display: none; }
+#joystick-zone {
+  position: fixed; bottom: 70px; left: 50px;
+  width: 120px; height: 120px; border-radius: 50%;
+  background: rgba(200,168,50,0.10);
+  border: 1px solid rgba(200,168,50,0.22);
+  touch-action: none; z-index: 50;
+}
+#joystick-knob {
+  position: absolute; width: 48px; height: 48px; border-radius: 50%;
+  background: rgba(200,168,50,0.32);
+  border: 1px solid rgba(200,168,50,0.5);
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  pointer-events: none;
+}
+#sprint-btn {
+  position: fixed; bottom: 90px; right: 55px;
+  width: 72px; height: 72px; border-radius: 50%;
+  background: rgba(200,168,50,0.10);
+  border: 1px solid rgba(200,168,50,0.28);
+  color: rgba(200,168,50,0.75); font-size: 8px; letter-spacing: 1px;
+  font-family: monospace; text-align: center; line-height: 1.3;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; z-index: 50; user-select: none;
+}
+#sprint-btn.active { background: rgba(200,168,50,0.28); }
+#look-zone {
+  position: fixed; top: 0; right: 0;
+  width: 55%; height: 100%;
+  touch-action: none; z-index: 40;
+}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>BACKROOMS</h1>
+  <div class="lvl">LEVEL  0  —  THE  LOBBY</div>
+  <div class="desc">you noclipped out of reality</div>
+  <button id="enter-btn">ENTER</button>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="progress-label">GENERATING…</div>
+</div>
+
+<div id="topleft">
+  <div id="level-tag">LEVEL 0 — THE LOBBY</div>
+  <div id="timer">00:00</div>
+</div>
+
+<div id="mobile-ui">
+  <div id="joystick-zone"><div id="joystick-knob"></div></div>
+  <div id="sprint-btn">LEFT<br>SHIFT<br>SPRINT</div>
+  <div id="look-zone"></div>
+</div>
+
+<div id="dead">
+  <h2>YOU ARE DEAD</h2>
+  <div class="survived" id="survived-time"></div>
+  <button onclick="location.reload()">RESTART</button>
+</div>
+
+<div id="pause" onclick="if(started){showPause(false);renderer.domElement.requestPointerLock();}">
+  <p>PAUSED — CLICK TO RESUME</p>
+</div>
+
+<div id="ui">
+  <div id="crosshair"></div>
+  <div id="info">WASD · MOUSE = LOOK · ESC = PAUSE · M = MUTE · LEFT SHIFT = SPRINT</div>
+</div>
+<div id="stamina-wrap"><div id="stamina-fill"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════
+//  SEEDED RNG
+// ═══════════════════════════════════════════════
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = Math.imul(s + 0x6D2B79F5, 1) | 0;
+    s = (s ^ s >>> 15) * (1 | s);
+    s = s + Math.imul(s ^ s >>> 7, 61 | s) ^ s;
+    return ((s ^ s >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ═══════════════════════════════════════════════
+//  POZICIONÁLIS HASH — determinisztikus, koordináta-alapú
+// ═══════════════════════════════════════════════
+function posHash(x, z, salt) {
+  let h = (Math.imul(x, 374761393) ^ Math.imul(z, 1234567891) ^ (salt | 0) ^ RUN_SEED) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1540483477);
+  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
+}
+
+// Zóna nyitottsága — 8×8 cellás blokkok, 0=szűk folyosó, 1=nyílt tér
+function zoneOpen(x, z) {
+  const bx = Math.floor(x / 8), bz = Math.floor(z / 8);
+  return posHash(bx, bz, 0xAA11BB22);
+}
+
+// Faltípus egy adott élhez (0=FULL, 1=HALF_BOT, 2=HANG_TOP)
+// Szobák határán lehet variáns, folyosóban mindig FULL
+function wallType(x, z, dir) {
+  if (!maze.isRoom(x, z)) return 0; // folyosó: mindig teljes fal
+  const r = posHash(x * 3 + dir * 100, z * 7 + dir * 200, 0x55AA66BB);
+  if (r < 0.84) return 0;  // 84% FULL
+  if (r < 0.93) return 1;  // 9% HALF_BOT
+  return 2;                 // 7% HANG_TOP
+}
+
+// ═══════════════════════════════════════════════
+//  ROOMS & CORRIDORS GENERÁTOR
+//  Szobák (2×2 – 5×5 cella) + összekötő folyosók
+// ═══════════════════════════════════════════════
+class Level {
+  constructor() { this.cells = new Map(); this.rooms = []; }
+  _key(x, z)    { return `${x},${z}`; }
+  _get(x, z)    { return this.cells.get(this._key(x, z)); }
+  _set(x, z, v) { this.cells.set(this._key(x, z), v); }
+
+  walls(x, z) {
+    // Kint a térképen: minden fal zárva (boundary)
+    return this._get(x, z) || { n:true, s:true, e:true, w:true };
+  }
+
+  isRoom(x, z) {
+    const c = this._get(x, z);
+    return c ? !!c.rm : false;
+  }
+
+  generate(r, rng) {
+    // 1. Minden cellát falakon zárt alapállapotba teszünk
+    for (let x = -r; x <= r; x++)
+      for (let z = -r; z <= r; z++)
+        this._set(x, z, { n:true, s:true, e:true, w:true, rm:false });
+
+    // 2. Szobák elhelyezése (overlap ellenőrzéssel)
+    const rooms = [];
+
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const rw = 2 + Math.floor(rng() * 4);  // 2–5 cella széles
+      const rh = 2 + Math.floor(rng() * 4);  // 2–5 cella magas
+      const rx = Math.round((rng() * 2 - 1) * (r - rw - 2));
+      const rz = Math.round((rng() * 2 - 1) * (r - rh - 2));
+
+      // 1 cella padding az átfedés-ellenőrzésnél
+      let ok = true;
+      for (const rm of rooms) {
+        if (rx <= rm.x + rm.w && rx + rw >= rm.x &&
+            rz <= rm.z + rm.h && rz + rh >= rm.z) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      rooms.push({ x:rx, z:rz, w:rw, h:rh,
+                   cx: rx + Math.floor(rw/2),
+                   cz: rz + Math.floor(rh/2) });
+
+      // Szoba belsejéből falak eltávolítása
+      for (let cx = rx; cx < rx + rw; cx++) {
+        for (let cz = rz; cz < rz + rh; cz++) {
+          const c = this._get(cx, cz); if (!c) continue;
+          c.rm = true;
+          if (cx < rx + rw - 1) { c.e = false; const r2 = this._get(cx+1,cz); if (r2) r2.w = false; }
+          if (cz < rz + rh - 1) { c.s = false; const r2 = this._get(cx,cz+1); if (r2) r2.n = false; }
+        }
+      }
+    }
+    this.rooms = rooms;
+
+    // 3. MST összekötés: minden szobát a legközelebbi még nem összekötötthöz kötünk
+    if (rooms.length === 0) return;
+    const connected = new Set([0]);
+    while (connected.size < rooms.length) {
+      let bi = -1, bj = -1, bd = Infinity;
+      for (const i of connected) {
+        for (let j = 0; j < rooms.length; j++) {
+          if (connected.has(j)) continue;
+          const d = Math.abs(rooms[i].cx - rooms[j].cx) + Math.abs(rooms[i].cz - rooms[j].cz);
+          if (d < bd) { bd = d; bi = i; bj = j; }
+        }
+      }
+      if (bj === -1) break;
+      this._corridor(rooms[bi].cx, rooms[bi].cz, rooms[bj].cx, rooms[bj].cz);
+      connected.add(bj);
+    }
+
+    // 4. Extra összekötések (~30%) a zsákutcák csökkentéséért
+    for (let i = 0; i < rooms.length; i++) {
+      if (rng() < 0.30) {
+        const j = Math.floor(rng() * rooms.length);
+        if (j !== i) this._corridor(rooms[i].cx, rooms[i].cz, rooms[j].cx, rooms[j].cz);
+      }
+    }
+  }
+
+  _corridor(x1, z1, x2, z2) {
+    // L-alakú folyosó: vízszintes, majd függőleges
+    let x = x1, z = z1;
+    while (x !== x2) {
+      const dx = x2 > x ? 1 : -1;
+      const c = this._get(x, z), nc = this._get(x+dx, z);
+      if (c && nc) { if (dx>0){c.e=false;nc.w=false;}else{c.w=false;nc.e=false;} }
+      x += dx;
+    }
+    while (z !== z2) {
+      const dz = z2 > z ? 1 : -1;
+      const c = this._get(x, z), nc = this._get(x, z+dz);
+      if (c && nc) { if (dz>0){c.s=false;nc.n=false;}else{c.n=false;nc.s=false;} }
+      z += dz;
+    }
+  }
+}
+
+const MAZE_R   = 55;
+const RUN_SEED = (Math.random() * 0xFFFFFFFF) >>> 0;
+const maze     = new Level();
+
+// ═══════════════════════════════════════════════
+//  THREE.JS
+// ═══════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.insertBefore(renderer.domElement, document.getElementById('ui'));
+
+const scene  = new THREE.Scene();
+scene.fog    = new THREE.FogExp2(0xc8a830, 0.038);
+scene.background = new THREE.Color(0xc8a830);
+
+scene.add(new THREE.AmbientLight(0xffe8a0, 0.62));
+scene.add(new THREE.HemisphereLight(0xffe090, 0xc8a020, 0.30));
+
+const camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.12, 160);
+camera.position.set(0, 1.72, 0);
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ═══════════════════════════════════════════════
+//  MATERIALS
+// ═══════════════════════════════════════════════
+const wallMat  = new THREE.MeshLambertMaterial({ color: 0xd4b84a });
+const floorMat = new THREE.MeshLambertMaterial({ color: 0x9a7c28 });
+const ceilMat  = new THREE.MeshLambertMaterial({ color: 0x6a5810 });
+const fixMat   = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const pillarMat = new THREE.MeshLambertMaterial({ color: 0xc8aa3a });
+
+const CELL = 5.0;
+const H    = 2.85;
+
+const W  = CELL + 0.14;
+const T  = 0.13;          // fal vastagsága
+const HH = H * 0.48;      // félmagasság (alacsony elválasztó)
+const HT = H * 0.42;      // lógó rész magassága (felülről)
+const WB = 0.88;          // ablak aljának magassága
+const WT = H - 1.90;      // ablak teteje feletti rész magassága
+
+const floorGeo    = new THREE.PlaneGeometry(CELL, CELL);
+const ceilGeo     = new THREE.PlaneGeometry(CELL, CELL);
+// FULL falak
+const wallHGeo    = new THREE.BoxGeometry(W,  H,  T);
+const wallVGeo    = new THREE.BoxGeometry(T,  H,  W);
+// HALF_BOT — alacsony félfal alulról
+const wallHHalfGeo = new THREE.BoxGeometry(W, HH, T);
+const wallVHalfGeo = new THREE.BoxGeometry(T, HH, W);
+// HANG_TOP — lóg a mennyezetről
+const wallHTopGeo  = new THREE.BoxGeometry(W, HT, T);
+const wallVTopGeo  = new THREE.BoxGeometry(T, HT, W);
+
+const fixGeo    = new THREE.BoxGeometry(0.55, 0.06, 1.9);
+const pillarGeo = new THREE.BoxGeometry(0.28, H, 0.28);
+
+// Rácsos point light-ok — ~11×11 = 121 db, nagy sugárral
+for (let x = -MAZE_R; x <= MAZE_R; x += 10)
+  for (let z = -MAZE_R; z <= MAZE_R; z += 10) {
+    const pl = new THREE.PointLight(0xfff0a0, 0.7, CELL * 12, 1.8);
+    pl.position.set(x * CELL, H - 0.2, z * CELL);
+    scene.add(pl);
+  }
+
+// ═══════════════════════════════════════════════
+//  LIGHT PLACEMENT RNG
+// ═══════════════════════════════════════════════
+const lrng = makeRng(0xF00DCAFE);
+const lightMap = new Map();
+function hasLight(x, z) {
+  const k = `${x},${z}`;
+  if (!lightMap.has(k)) lightMap.set(k, lrng() < 0.62);
+  return lightMap.get(k);
+}
+
+// ═══════════════════════════════════════════════
+//  WORLD BUILD — InstancedMesh, async batched
+// ═══════════════════════════════════════════════
+async function buildWorld(onProgress) {
+  const size  = MAZE_R * 2 + 1;
+  const total = size * size;
+
+  // felső korlát instance-okhoz
+  const maxW = total * 2;  // max 2 H-fal vagy 2 V-fal cellánként
+
+  const floorIM     = new THREE.InstancedMesh(floorGeo,      floorMat,  total);
+  const ceilIM      = new THREE.InstancedMesh(ceilGeo,       ceilMat,   total);
+  // FULL
+  const wallHIM     = new THREE.InstancedMesh(wallHGeo,      wallMat,   maxW);
+  const wallVIM     = new THREE.InstancedMesh(wallVGeo,      wallMat,   maxW);
+  // HALF_BOT
+  const wallHHalfIM = new THREE.InstancedMesh(wallHHalfGeo,  wallMat,   maxW);
+  const wallVHalfIM = new THREE.InstancedMesh(wallVHalfGeo,  wallMat,   maxW);
+  // HANG_TOP
+  const wallHTopIM  = new THREE.InstancedMesh(wallHTopGeo,   wallMat,   maxW);
+  const wallVTopIM  = new THREE.InstancedMesh(wallVTopGeo,   wallMat,   maxW);
+  // egyéb
+  const fixIM       = new THREE.InstancedMesh(fixGeo,        fixMat,    total);
+  const pillarIM    = new THREE.InstancedMesh(pillarGeo,     pillarMat, total * 4);
+
+  [floorIM, ceilIM, wallHIM, wallVIM, wallHHalfIM, wallVHalfIM,
+   wallHTopIM, wallVTopIM, fixIM, pillarIM
+  ].forEach(m => { m.frustumCulled = false; });
+
+  const dummy = new THREE.Object3D();
+  let fi = 0, ci = 0, whi = 0, wvi = 0;
+  let whhi = 0, wvhi = 0, whti = 0, wvti = 0;
+  let fxi = 0, pi = 0;
+  const half = CELL / 2;
+
+  const cells = [];
+  for (let x = -MAZE_R; x <= MAZE_R; x++)
+    for (let z = -MAZE_R; z <= MAZE_R; z++)
+      cells.push([x, z]);
+
+  const BATCH = 300;
+  for (let i = 0; i < cells.length; i += BATCH) {
+    const end = Math.min(i + BATCH, cells.length);
+    for (let j = i; j < end; j++) {
+      const [mx, mz] = cells[j];
+      const wx = mx * CELL, wz = mz * CELL;
+      const w  = maze.walls(mx, mz);
+
+      // Floor
+      dummy.position.set(wx, 0, wz);
+      dummy.rotation.set(-Math.PI / 2, 0, 0);
+      dummy.updateMatrix();
+      floorIM.setMatrixAt(fi++, dummy.matrix);
+
+      // Ceiling
+      dummy.position.set(wx, H, wz);
+      dummy.rotation.set(Math.PI / 2, 0, 0);
+      dummy.updateMatrix();
+      ceilIM.setMatrixAt(ci++, dummy.matrix);
+
+      // Walls — típusonként elhelyezve
+      dummy.rotation.set(0, 0, 0);
+      const placeWall = (isH, px, pz, dir) => {
+        const t = wallType(mx, mz, dir);
+        if (isH) {
+          if (t === 0) { dummy.position.set(px, H/2,         pz); dummy.updateMatrix(); wallHIM.setMatrixAt(whi++, dummy.matrix); }
+          else if (t === 1) { dummy.position.set(px, HH/2,        pz); dummy.updateMatrix(); wallHHalfIM.setMatrixAt(whhi++, dummy.matrix); }
+          else if (t === 2) { dummy.position.set(px, H - HT/2,    pz); dummy.updateMatrix(); wallHTopIM.setMatrixAt(whti++, dummy.matrix); }
+        } else {
+          if (t === 0) { dummy.position.set(px, H/2,      pz); dummy.updateMatrix(); wallVIM.setMatrixAt(wvi++, dummy.matrix); }
+          else if (t === 1) { dummy.position.set(px, HH/2,     pz); dummy.updateMatrix(); wallVHalfIM.setMatrixAt(wvhi++, dummy.matrix); }
+          else             { dummy.position.set(px, H - HT/2, pz); dummy.updateMatrix(); wallVTopIM.setMatrixAt(wvti++, dummy.matrix); }
+        }
+      };
+      if (w.n) placeWall(true,  wx,        wz - half, 0);
+      if (w.s) placeWall(true,  wx,        wz + half, 1);
+      if (w.e) placeWall(false, wx + half, wz,        2);
+      if (w.w) placeWall(false, wx - half, wz,        3);
+
+      // Fixture
+      if (hasLight(mx, mz)) {
+        dummy.position.set(wx, H - 0.04, wz);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        fixIM.setMatrixAt(fxi++, dummy.matrix);
+      }
+
+      // Pillérek a sarokpontokon ahol falak találkoznak
+      const corners = [
+        { ox: half, oz: half,  walls: [w.s, w.e, maze.walls(mx+1,mz).s, maze.walls(mx,mz+1).e] },
+        { ox: -half, oz: half,  walls: [w.s, w.w, maze.walls(mx-1,mz).s, maze.walls(mx,mz+1).w] },
+        { ox: half, oz: -half,  walls: [w.n, w.e, maze.walls(mx+1,mz).n, maze.walls(mx,mz-1).e] },
+        { ox: -half, oz: -half, walls: [w.n, w.w, maze.walls(mx-1,mz).n, maze.walls(mx,mz-1).w] },
+      ];
+      for (const c of corners) {
+        const wallCount = c.walls.filter(Boolean).length;
+        if (wallCount >= 2) {
+          dummy.position.set(wx + c.ox, H/2, wz + c.oz);
+          dummy.rotation.set(0, 0, 0);
+          dummy.updateMatrix();
+          pillarIM.setMatrixAt(pi++, dummy.matrix);
+        }
+      }
+    }
+    onProgress((i + BATCH) / cells.length);
+    await new Promise(r => requestAnimationFrame(r));
+  }
+
+  const allIM = [
+    [floorIM, fi], [ceilIM, ci],
+    [wallHIM, whi], [wallVIM, wvi],
+    [wallHHalfIM, whhi], [wallVHalfIM, wvhi],
+    [wallHTopIM, whti], [wallVTopIM, wvti],
+    [fixIM, fxi], [pillarIM, pi],
+  ];
+  for (const [m, cnt] of allIM) {
+    m.count = cnt;
+    m.instanceMatrix.needsUpdate = true;
+    scene.add(m);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  COLLISION
+// ═══════════════════════════════════════════════
+const COL_M = 0.52;
+const COL_H = CELL / 2 - 0.08;
+
+function canMove(nx, nz) {
+  const lim  = COL_H - COL_M;
+  const reach = CELL / 2 + COL_M; // max távolság amiben szomszéd fal releváns
+  const cx = Math.round(nx / CELL);
+  const cz = Math.round(nz / CELL);
+
+  // Aktuális + 4 szomszéd cella fal-ellenőrzése
+  // (ez javítja: fal geometriájába belesétálás a szomszéd cella irányából)
+  const checks = [[cx,cz],[cx+1,cz],[cx-1,cz],[cx,cz+1],[cx,cz-1]];
+  for (const [ccx,ccz] of checks) {
+    const lx = nx - ccx * CELL;
+    const lz = nz - ccz * CELL;
+    if (Math.abs(lx) > reach || Math.abs(lz) > reach) continue;
+    const w = maze.walls(ccx, ccz);
+    if (w.n && lz < -lim) return false;
+    if (w.s && lz >  lim) return false;
+    if (w.w && lx < -lim) return false;
+    if (w.e && lx >  lim) return false;
+  }
+
+  // Sarok check az aktuális cellára
+  const half = CELL / 2;
+  const cr2  = (COL_M * 2.2) * (COL_M * 2.2);
+  const w = maze.walls(cx, cz);
+  if (w.n && w.w && (nx-cx*CELL+half)*(nx-cx*CELL+half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
+  if (w.n && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
+  if (w.s && w.w && (nx-cx*CELL+half)*(nx-cx*CELL+half) + (nz-cz*CELL-half)*(nz-cz*CELL-half) < cr2) return false;
+  if (w.s && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL-half)*(nz-cz*CELL-half) < cr2) return false;
+  return true;
+}
+
+// ═══════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════
+const keys = {};
+let muted = localStorage.getItem('backrooms_muted') === '1';
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyX' && started) {
+    const mesh = createBacteria(0x1144cc);
+    mesh.position.set(
+      camera.position.x + Math.sin(yaw) * -4,
+      0,
+      camera.position.z + Math.cos(yaw) * -4
+    );
+    scene.add(mesh);
+    monsters.push({ mesh,
+      cx: Math.round(mesh.position.x/CELL),
+      cz: Math.round(mesh.position.z/CELL),
+      tx: Math.round(mesh.position.x/CELL),
+      tz: Math.round(mesh.position.z/CELL),
+      speed: 1.2, waitT: 0, passive: true });
+  }
+  if (e.code === 'KeyM' && window._audioOut) {
+    muted = !muted;
+    window._audioOut.gain.value = muted ? 0 : 0.8;
+    localStorage.setItem('backrooms_muted', muted ? '1' : '0');
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+let yaw = 0, pitch = 0, locked = false, paused = false, started = false;
+
+// ── Mobil detekció ──
+const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+if (isMobile) document.getElementById('mobile-ui').style.display = 'block';
+
+// Touch állapot
+const touchMove = { x: 0, z: 0 };
+let touchSprint = false;
+
+if (isMobile) {
+  const joyZone  = document.getElementById('joystick-zone');
+  const joyKnob  = document.getElementById('joystick-knob');
+  const sprintBtn= document.getElementById('sprint-btn');
+  const lookZone = document.getElementById('look-zone');
+  const JR = 60; // joystick sugár px
+
+  let joyId = null, joyOx = 0, joyOz = 0;
+  let lookId = null, lookPrevX = 0, lookPrevY = 0;
+
+  // Joystick
+  joyZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    joyId = t.identifier;
+    const r = joyZone.getBoundingClientRect();
+    joyOx = r.left + r.width / 2;
+    joyOz = r.top  + r.height / 2;
+  }, { passive: false });
+  joyZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== joyId) continue;
+      const dx = t.clientX - joyOx;
+      const dy = t.clientY - joyOz;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const clamped = Math.min(dist, JR);
+      const nx = dist > 0 ? dx / dist * clamped : 0;
+      const ny = dist > 0 ? dy / dist * clamped : 0;
+      joyKnob.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+      touchMove.x = nx / JR;
+      touchMove.z = ny / JR;
+    }
+  }, { passive: false });
+  const joyEnd = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier !== joyId) continue;
+      joyId = null;
+      touchMove.x = 0; touchMove.z = 0;
+      joyKnob.style.transform = 'translate(-50%,-50%)';
+    }
+  };
+  joyZone.addEventListener('touchend', joyEnd);
+  joyZone.addEventListener('touchcancel', joyEnd);
+
+  // Sprint gomb
+  sprintBtn.addEventListener('touchstart', e => { e.preventDefault(); touchSprint = true;  sprintBtn.classList.add('active'); },    { passive: false });
+  sprintBtn.addEventListener('touchend',   e => { e.preventDefault(); touchSprint = false; sprintBtn.classList.remove('active'); }, { passive: false });
+  sprintBtn.addEventListener('touchcancel',e => { touchSprint = false; sprintBtn.classList.remove('active'); });
+
+  // Look drag (jobb oldal)
+  lookZone.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    if (lookId !== null) return;
+    lookId = t.identifier; lookPrevX = t.clientX; lookPrevY = t.clientY;
+  }, { passive: false });
+  lookZone.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier !== lookId) continue;
+      yaw   -= (t.clientX - lookPrevX) * 0.004;
+      pitch -= (t.clientY - lookPrevY) * 0.004;
+      pitch  = Math.max(-1.1, Math.min(1.1, pitch));
+      lookPrevX = t.clientX; lookPrevY = t.clientY;
+    }
+  }, { passive: false });
+  const lookEnd = e => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+  lookZone.addEventListener('touchend', lookEnd);
+  lookZone.addEventListener('touchcancel', lookEnd);
+}
+
+document.addEventListener('mousemove', e => {
+  if (!locked || paused) return;
+  yaw   -= e.movementX * 0.0022;
+  pitch -= e.movementY * 0.0022;
+  pitch  = Math.max(-1.1, Math.min(1.1, pitch));
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && started && !paused && !isMobile && !dead) showPause(true);
+});
+renderer.domElement.addEventListener('click', () => {
+  if (!started || isMobile) return;
+  if (paused) showPause(false);
+  renderer.domElement.requestPointerLock();
+});
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && started) {
+    if (locked) { document.exitPointerLock(); showPause(true); }
+    else        { showPause(false); renderer.domElement.requestPointerLock(); }
+  }
+});
+function showPause(on) {
+  paused = on;
+  document.getElementById('pause').className = on ? 'show' : '';
+}
+
+// ═══════════════════════════════════════════════
+//  AUDIO
+// ═══════════════════════════════════════════════
+function initAudio() {
+  const ac  = new (window.AudioContext || window.webkitAudioContext)();
+  ac.resume();
+  const out = ac.createGain();
+  out.gain.value = muted ? 0 : 0.8;
+  out.connect(ac.destination);
+
+  const hum = ac.createOscillator();
+  const humG = ac.createGain();
+  hum.type = 'sawtooth';
+  hum.frequency.value = 120;
+  humG.gain.value = 0.06;
+  hum.connect(humG); humG.connect(out); hum.start();
+
+  const hum2 = ac.createOscillator();
+  const humG2 = ac.createGain();
+  hum2.type = 'square';
+  hum2.frequency.value = 240;
+  humG2.gain.value = 0.025;
+  hum2.connect(humG2); humG2.connect(out); hum2.start();
+
+  function tick() {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'square';
+    o.frequency.value = 650 + Math.random() * 700;
+    g.gain.setValueAtTime(0.05, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.1);
+    o.connect(g); g.connect(out); o.start(); o.stop(ac.currentTime + 0.12);
+    setTimeout(tick, 4000 + Math.random() * 8000);
+  }
+  setTimeout(tick, 1500);
+
+  window._audioOut = out;
+}
+
+// ═══════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════
+const enterBtn     = document.getElementById('enter-btn');
+const progressWrap = document.getElementById('progress-wrap');
+const progressBar  = document.getElementById('progress-bar');
+const progressLbl  = document.getElementById('progress-label');
+
+enterBtn.addEventListener('click', async () => {
+  initAudio();
+  enterBtn.disabled = true;
+  progressWrap.style.display = 'block';
+  progressLbl.style.display  = 'block';
+
+  maze.generate(MAZE_R, makeRng(RUN_SEED));
+
+  // Start garantálás — 3×3-as nyitott szoba (0,0) körül
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const c = maze._get(dx, dz);
+      if (!c) continue;
+      // Jobb szomszéddal összenyitás
+      if (dx < 1) { c.e = false; const r = maze._get(dx+1, dz); if (r) r.w = false; }
+      // Alsó szomszéddal összenyitás
+      if (dz < 1) { c.s = false; const r = maze._get(dx, dz+1); if (r) r.n = false; }
+    }
+  }
+
+  await buildWorld(p => {
+    progressBar.style.width = Math.min(100, Math.round(p * 100)) + '%';
+    progressLbl.textContent = 'GENERATING… ' + Math.min(100, Math.round(p * 100)) + '%';
+  });
+
+  spawnMonsters();
+  document.getElementById('overlay').style.display = 'none';
+  started = true;
+  timerStart = performance.now();
+  if (!isMobile) renderer.domElement.requestPointerLock();
+  prev = performance.now();
+  requestAnimationFrame(loop);
+});
+
+// ═══════════════════════════════════════════════
+//  BACTERIA
+// ═══════════════════════════════════════════════
+function createBacteria(color = 0x0a0a0a) {
+  const g   = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+
+  function tube(pts, r, seg = 7) {
+    const curve = new THREE.CatmullRomCurve3(
+      pts.map(([x,y,z]) => new THREE.Vector3(x, y, z))
+    );
+    return new THREE.Mesh(new THREE.TubeGeometry(curve, seg, r, 4, false), mat);
+  }
+
+  // ── Fej csoport (forgatható) ──
+  const headGrp = new THREE.Group();
+  headGrp.position.y = 2.62;
+  const headMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.21, 0), mat);
+  headMesh.scale.set(1.35, 1.05, 0.88);
+  headMesh.rotation.set(0.3, 0.7, 0.15);
+  headGrp.add(headMesh);
+  const sp1 = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.22, 4), mat);
+  sp1.position.set(0.13, 0.20, 0.07); sp1.rotation.set(0.2, 0, 0.35);
+  headGrp.add(sp1);
+  const sp2 = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.16, 4), mat);
+  sp2.position.set(-0.09, 0.22, -0.06); sp2.rotation.set(-0.1, 0, -0.3);
+  headGrp.add(sp2);
+  const sp3 = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.12, 4), mat);
+  sp3.position.set(0.02, 0.26, 0.10); sp3.rotation.set(0.4, 0, 0.1);
+  headGrp.add(sp3);
+  g.add(headGrp);
+
+  // ── Bal kar (pivot a csatlakozási pontnál) ──
+  const leftArmGrp = new THREE.Group();
+  leftArmGrp.position.set(0, 2.4, 0);
+  leftArmGrp.add(tube([[0,0,0],[-0.18,-0.60,0.04],[-0.45,-1.40,0.02],[-0.85,-2.10,0],[-1.25,-2.40,0]], 0.030, 10));
+  leftArmGrp.add(tube([[-1.25,-2.40,0],[-1.42,-2.40, 0.10],[-1.55,-2.40, 0.08]], 0.013, 3));
+  leftArmGrp.add(tube([[-1.25,-2.40,0],[-1.38,-2.38,-0.10],[-1.52,-2.40,-0.09]], 0.013, 3));
+  leftArmGrp.add(tube([[-1.25,-2.40,0],[-1.18,-2.40, 0.16],[-1.30,-2.40, 0.24]], 0.010, 3));
+  g.add(leftArmGrp);
+
+  // ── Jobb kar ──
+  const rightArmGrp = new THREE.Group();
+  rightArmGrp.position.set(0, 2.4, 0);
+  rightArmGrp.add(tube([[0,0,0],[0.18,-0.60,-0.04],[0.45,-1.40,-0.02],[0.85,-2.10,0],[1.25,-2.40,0]], 0.030, 10));
+  rightArmGrp.add(tube([[1.25,-2.40,0],[1.42,-2.40, 0.10],[1.55,-2.40, 0.08]], 0.013, 3));
+  rightArmGrp.add(tube([[1.25,-2.40,0],[1.38,-2.38,-0.10],[1.52,-2.40,-0.09]], 0.013, 3));
+  rightArmGrp.add(tube([[1.25,-2.40,0],[1.18,-2.40, 0.16],[1.30,-2.40, 0.24]], 0.010, 3));
+  g.add(rightArmGrp);
+
+  // ── Test-fonalak csoport ──
+  const bodyGrp = new THREE.Group();
+  bodyGrp.add(tube([[0,2.35,0],[-0.06,1.85,0.04],[0.09,1.35,0],[-0.04,0.85,0],[0,0.6,0]], 0.016, 7));
+  bodyGrp.add(tube([[0.03,2.15,0],[0.12,1.65,0],[-0.07,1.15,-0.03],[0.05,0.65,0]], 0.012, 6));
+  bodyGrp.add(tube([[-0.04,1.95,0.02],[0.06,1.45,0],[-0.1,0.95,0],[0.02,0.5,0]], 0.010, 5));
+  g.add(bodyGrp);
+
+  // ── Lábak csoport ──
+  const legsGrp = new THREE.Group();
+  legsGrp.add(tube([[0,0.78,0],[-0.1,0.45,0.02],[-0.07,0.15,0],[-0.18,0,0]], 0.022, 5));
+  legsGrp.add(tube([[0,0.78,0],[0.1,0.45,-0.02],[0.07,0.15,0],[0.14,0,0]], 0.022, 5));
+  g.add(legsGrp);
+
+  // Animáció metaadatok
+  const offset = Math.random() * Math.PI * 2;
+  g.userData.anim = { headGrp, leftArmGrp, rightArmGrp, bodyGrp, legsGrp, offset };
+  g.scale.setScalar(0.85);
+
+  return g;
+}
+
+const monsters = [];
+
+function spawnMonsters() {
+  const rng2 = makeRng(RUN_SEED ^ 0xDEAD);
+  const rooms = maze.rooms;
+  if (!rooms || rooms.length < 2) return;
+
+  const count = 50;
+
+  for (let i = 0; i < count; i++) {
+    const ri = Math.floor(rng2() * rooms.length);
+
+    const rm = rooms[ri];
+    const mesh = createBacteria();
+    mesh.position.set(rm.cx * CELL, 0, rm.cz * CELL);
+    scene.add(mesh);
+
+    monsters.push({
+      mesh,
+      cx: rm.cx, cz: rm.cz,       // jelenlegi cella
+      tx: rm.cx, tz: rm.cz,       // célcella
+      speed: 0.8 + rng2() * 0.6,  // mozgássebesség (lassú bolyongás)
+      waitT: rng2() * 3,           // indulás előtti várakozás
+    });
+  }
+}
+
+const DETECT_DIST = 18; // ennyi world unit-on belül meglát
+const CHASE_SPEED = 5.5;
+const WANDER_SPEED = 0.9;
+
+function updateMonsters(dt) {
+  for (const m of monsters) {
+    const pdx = camera.position.x - m.mesh.position.x;
+    const pdz = camera.position.z - m.mesh.position.z;
+    const playerDist = Math.sqrt(pdx*pdx + pdz*pdz);
+
+    // Látásvizsgálat — passive példányok nem üldöznek
+    if (!m.passive) {
+      if (playerDist < DETECT_DIST) m.chasing = true;
+      if (playerDist > DETECT_DIST * 2) m.chasing = false;
+    }
+
+    // Testrész animáció
+    const a = m.mesh.userData.anim;
+    if (a) {
+      const t = performance.now() * 0.001 + a.offset;
+      if (m.chasing) {
+        // ── Üldözés: rángatózó, felnyúló karok ──
+        // Irregulárisan rángatózó függvény
+        const jL = Math.sign(Math.sin(t * 6.3)) * Math.abs(Math.sin(t * 4.1));
+        const jR = Math.sign(Math.sin(t * 5.7 + 1.2)) * Math.abs(Math.sin(t * 3.8 + 0.9));
+        // Karok előre-felfelé nyúlnak (~75°) és rángatóznak
+        a.leftArmGrp.rotation.x  = -1.30 + jL * 0.40;
+        a.rightArmGrp.rotation.x = -1.30 + jR * 0.40;
+        a.leftArmGrp.rotation.z  =  0.30 + Math.abs(Math.sin(t * 4.5)) * 0.25;
+        a.rightArmGrp.rotation.z = -0.30 - Math.abs(Math.sin(t * 4.5 + 0.7)) * 0.25;
+        a.leftArmGrp.rotation.y  =  jL * 0.22;
+        a.rightArmGrp.rotation.y =  jR * 0.22;
+        // Fej — erősen rángatózik
+        a.headGrp.rotation.x = Math.sin(t * 7.0) * 0.28;
+        a.headGrp.rotation.z = jL * 0.22;
+        a.headGrp.rotation.y = Math.sin(t * 5.5 + 0.8) * 0.30;
+        // Test és lábak — gyors kapálózás
+        a.bodyGrp.rotation.y = Math.sin(t * 5.0) * 0.22;
+        a.bodyGrp.rotation.x = jR * 0.12;
+        a.legsGrp.rotation.x = Math.sin(t * 7.5) * 0.20;
+        a.legsGrp.rotation.z = Math.sin(t * 7.5 + Math.PI/2) * 0.10;
+      } else {
+        // ── Barangolás: lassú, lebegő ──
+        a.headGrp.rotation.x = Math.sin(t * 1.4) * 0.18;
+        a.headGrp.rotation.z = Math.sin(t * 1.1 + 1) * 0.14;
+        a.headGrp.rotation.y = Math.sin(t * 0.8) * 0.20;
+        a.leftArmGrp.rotation.z  =  Math.sin(t * 0.9) * 0.10;
+        a.rightArmGrp.rotation.z = -Math.sin(t * 0.9) * 0.10;
+        a.leftArmGrp.rotation.x  =  Math.sin(t * 0.6 + 0.5) * 0.07;
+        a.rightArmGrp.rotation.x =  Math.sin(t * 0.6 - 0.5) * 0.07;
+        a.bodyGrp.rotation.y = Math.sin(t * 1.2) * 0.15;
+        a.bodyGrp.rotation.x = Math.sin(t * 0.7 + 2) * 0.06;
+        a.legsGrp.rotation.x = Math.sin(t * 1.8) * 0.12;
+        a.legsGrp.rotation.z = Math.sin(t * 1.8 + Math.PI/2) * 0.06;
+      }
+    }
+
+    if (m.chasing) {
+      // Egyenesen a játékos felé rohan — fal-ütközéssel
+      const spd = CHASE_SPEED * dt / playerDist;
+      const mx = m.mesh.position.x, mz = m.mesh.position.z;
+      const nx = mx + pdx * spd, nz = mz + pdz * spd;
+      const moveX = canMove(nx, mz);
+      const moveZ = canMove(mx, nz);
+      if (moveX) m.mesh.position.x = nx;
+      if (moveZ) m.mesh.position.z = nz;
+      // Ha mindkét irányban blokkolva: próbálj csúszni az elérhető tengelyen
+      m.mesh.rotation.y = Math.atan2(pdx, pdz);
+      m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.012)) * 0.12;
+    } else {
+      // Bolyongás
+      if (m.waitT > 0) { m.waitT -= dt; continue; }
+
+      const wx = m.tx * CELL, wz = m.tz * CELL;
+      const dx = wx - m.mesh.position.x;
+      const dz = wz - m.mesh.position.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+
+      if (dist < 0.15) {
+        m.cx = m.tx; m.cz = m.tz;
+        const w = maze.walls(m.cx, m.cz);
+        const opts = [];
+        if (!w.n) opts.push([m.cx,   m.cz-1]);
+        if (!w.s) opts.push([m.cx,   m.cz+1]);
+        if (!w.e) opts.push([m.cx+1, m.cz  ]);
+        if (!w.w) opts.push([m.cx-1, m.cz  ]);
+        if (opts.length) {
+          const pick = opts[Math.floor(Math.random() * opts.length)];
+          m.tx = pick[0]; m.tz = pick[1];
+        }
+        m.waitT = 0.5 + Math.random() * 2.0;
+      } else {
+        const spd = WANDER_SPEED * dt / dist;
+        m.mesh.position.x += dx * spd;
+        m.mesh.position.z += dz * spd;
+        m.mesh.rotation.y = Math.atan2(dx, dz);
+        m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.004)) * 0.05;
+      }
+    }
+  }
+}
+
+function hasLineOfSight(ax, az, bx, bz) {
+  const steps = 12;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = ax + (bx - ax) * t;
+    const z = az + (bz - az) * t;
+    if (!canMove(x, z)) return false;
+  }
+  return true;
+}
+
+let dead = false;
+function checkDeath() {
+  if (dead) return;
+  for (const m of monsters) {
+    if (m.passive) continue;
+    const dx = m.mesh.position.x - camera.position.x;
+    const dz = m.mesh.position.z - camera.position.z;
+    if (dx*dx + dz*dz < 2.8*2.8) {
+      if (!hasLineOfSight(m.mesh.position.x, m.mesh.position.z, camera.position.x, camera.position.z)) continue;
+      dead = true;
+      if (timerStart !== null) {
+        const s = Math.floor((performance.now() - timerStart) / 1000);
+        const mm = String(Math.floor(s/60)).padStart(2,'0');
+        const ss = String(s % 60).padStart(2,'0');
+        document.getElementById('survived-time').textContent = `SURVIVED  ${mm}:${ss}`;
+      }
+      document.getElementById('dead').className = 'show';
+      document.exitPointerLock();
+      return;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  GAME LOOP
+// ═══════════════════════════════════════════════
+const fwd   = new THREE.Vector3();
+const right = new THREE.Vector3();
+const SPEED = 4.0;
+const SPRINT_SPEED = 7.5;
+const STAMINA_MAX  = 15.0; // 15mp sprint
+const STAMINA_DRAIN = 1.0; // 1mp/mp fogyás sprint közben
+const STAMINA_REGEN = 0.5; // 0.5mp/mp töltés → 30mp pihi
+let stamina = STAMINA_MAX;
+let sprintCooldown = false; // true: kimerült, várni kell
+const staminaFill = document.getElementById('stamina-fill');
+const timerEl = document.getElementById('timer');
+let timerStart = null;
+let prev = 0, bobT = 0;
+
+function loop() {
+  requestAnimationFrame(loop);
+  if (!started || paused) return;
+
+  const now = performance.now();
+  const dt  = Math.min((now - prev) / 1000, 0.05);
+  prev = now;
+
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+
+  fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+
+  let mx = 0, mz = 0;
+  if (isMobile) {
+    mx = fwd.x * (-touchMove.z) + right.x * touchMove.x;
+    mz = fwd.z * (-touchMove.z) + right.z * touchMove.x;
+  } else {
+    if (keys['KeyW'] || keys['ArrowUp'])    { mx += fwd.x;   mz += fwd.z;   }
+    if (keys['KeyS'] || keys['ArrowDown'])  { mx -= fwd.x;   mz -= fwd.z;   }
+    if (keys['KeyA'] || keys['ArrowLeft'])  { mx -= right.x; mz -= right.z; }
+    if (keys['KeyD'] || keys['ArrowRight']) { mx += right.x; mz += right.z; }
+  }
+
+  const len = Math.sqrt(mx * mx + mz * mz);
+  const moving = len > 0.001;
+  const wantSprint = isMobile ? touchSprint : keys['ShiftLeft'];
+  const sprinting = moving && wantSprint && stamina > 0;
+  if (sprinting) {
+    stamina = Math.max(0, stamina - STAMINA_DRAIN * dt);
+  } else {
+    stamina = Math.min(STAMINA_MAX, stamina + STAMINA_REGEN * dt);
+  }
+  // Stamina sáv — piros ha 30% alatt, egyébként arany
+  const pct = stamina / STAMINA_MAX;
+  staminaFill.style.width = (pct * 100) + '%';
+  staminaFill.style.background = pct < 0.30
+    ? `rgba(160,60,40,${0.5 + Math.sin(now * 0.005) * 0.25})`
+    : `rgba(200,168,50,${0.45 + pct * 0.45})`;
+  if (moving && !dead) {
+    const spd = (sprinting ? SPRINT_SPEED : SPEED) * dt / len;
+    const nx = camera.position.x + mx * spd;
+    const nz = camera.position.z + mz * spd;
+    if (canMove(nx, camera.position.z)) camera.position.x = nx;
+    if (canMove(camera.position.x, nz)) camera.position.z = nz;
+    bobT += dt * (sprinting ? 9.0 : 5.5);
+  }
+
+  camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
+
+  if (!dead) { updateMonsters(dt); checkDeath(); }
+
+  if (timerStart !== null) {
+    const s = Math.floor((performance.now() - timerStart) / 1000);
+    timerEl.textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  }
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
