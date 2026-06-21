@@ -1268,6 +1268,45 @@ let sprintCooldown = false; // true: kimerült, várni kell
 const staminaFill = document.getElementById('stamina-fill');
 const timerEl = document.getElementById('timer');
 let timerStart = null;
+
+// Anti-camp: ha 30mp alatt nem mozdul 3 egységnél többet, spawnol rá egy szörny
+const CAMP_TIME = 30.0;
+const CAMP_DIST = 8.0;
+let campCheckPos = null;
+let campTimer = 0;
+
+function checkCamping(dt) {
+  if (!campCheckPos) {
+    campCheckPos = { x: camera.position.x, z: camera.position.z };
+    return;
+  }
+  const dx = camera.position.x - campCheckPos.x;
+  const dz = camera.position.z - campCheckPos.z;
+  if (Math.sqrt(dx*dx + dz*dz) > CAMP_DIST) {
+    // eleget mozgott, reset
+    campTimer = 0;
+    campCheckPos = { x: camera.position.x, z: camera.position.z };
+    return;
+  }
+  campTimer += dt;
+  if (campTimer >= CAMP_TIME) {
+    campTimer = 0;
+    campCheckPos = { x: camera.position.x, z: camera.position.z };
+    // Játékos pozíciójára teleportál (garantáltan valid)
+    const backX = camera.position.x;
+    const backZ = camera.position.z;
+    if (monsters.length > 0) {
+      const m = monsters[0];
+      m.mesh.position.set(backX, 0, backZ);
+      m.cx = Math.round(backX / CELL);
+      m.cz = Math.round(backZ / CELL);
+      m.tx = m.cx; m.tz = m.cz;
+      m.chasing = true;
+    } else {
+      spawnOneMonster(Math.round(backX / CELL), Math.round(backZ / CELL), true);
+    }
+  }
+}
 let prev = 0, bobT = 0;
 
 function loop() {
@@ -1323,7 +1362,7 @@ function loop() {
   camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
   updateLights();
-  if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); }
+  if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); checkCamping(dt); }
   else { updateMonsterAnims(); }
 
   if (dead && deathAnimStart !== null) {
