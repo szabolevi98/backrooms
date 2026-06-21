@@ -665,9 +665,9 @@ async function buildWorld(onProgress) {
 const COL_M = 0.52;
 const COL_H = CELL / 2 - 0.08;
 
-function canMove(nx, nz) {
-  const lim  = COL_H - COL_M;
-  const reach = CELL / 2 + COL_M; // max távolság amiben szomszéd fal releváns
+function canMove(nx, nz, margin = COL_M) {
+  const lim  = COL_H - margin;
+  const reach = CELL / 2 + margin; // max távolság amiben szomszéd fal releváns
   const cx = Math.round(nx / CELL);
   const cz = Math.round(nz / CELL);
 
@@ -687,7 +687,7 @@ function canMove(nx, nz) {
 
   // Sarok check az aktuális cellára
   const half = CELL / 2;
-  const cr2  = (COL_M * 2.2) * (COL_M * 2.2);
+  const cr2  = (margin * 2.2) * (margin * 2.2);
   const w = maze.walls(cx, cz);
   if (w.n && w.w && (nx-cx*CELL+half)*(nx-cx*CELL+half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
   if (w.n && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
@@ -1037,35 +1037,64 @@ function createBacteria(color = 0x0a0a0a) {
 }
 
 const monsters = [];
+const RESPAWN_DIST = 60; // world unit — ennél messzebb respawnol
+let respawnCooldown = 0;
+
+function spawnOneMonster(cx, cz, chasing = false) {
+  const mesh = createBacteria();
+  mesh.position.set(cx * CELL, 0, cz * CELL);
+  scene.add(mesh);
+  monsters.push({ mesh, cx, cz, tx: cx, tz: cz, speed: 0.8, waitT: 0, chasing });
+}
 
 function spawnMonsters() {
-  const rng2 = makeRng(RUN_SEED ^ 0xDEAD);
   const rooms = maze.rooms;
   if (!rooms || rooms.length < 2) return;
+  const far = rooms.filter(r => Math.abs(r.cx) + Math.abs(r.cz) > 8);
+  const rm = far[Math.floor(Math.random() * far.length)] || rooms[1];
+  spawnOneMonster(rm.cx, rm.cz, false);
+}
 
-  const count = 50;
+function checkRespawn(dt) {
+  respawnCooldown -= dt;
+  if (respawnCooldown > 0) return;
+  if (monsters.length === 0) return;
 
-  for (let i = 0; i < count; i++) {
-    const ri = Math.floor(rng2() * rooms.length);
+  const m = monsters[0];
+  const dx = m.mesh.position.x - camera.position.x;
+  const dz = m.mesh.position.z - camera.position.z;
+  if (dx*dx + dz*dz < RESPAWN_DIST * RESPAWN_DIST) return;
 
-    const rm = rooms[ri];
-    const mesh = createBacteria();
-    mesh.position.set(rm.cx * CELL, 0, rm.cz * CELL);
-    scene.add(mesh);
+  // Cooldown: ne keresse minden frame-ben
+  respawnCooldown = 2.0;
 
-    monsters.push({
-      mesh,
-      cx: rm.cx, cz: rm.cz,       // jelenlegi cella
-      tx: rm.cx, tz: rm.cz,       // célcella
-      speed: 0.8 + rng2() * 0.6,  // mozgássebesség (lassú bolyongás)
-      waitT: rng2() * 3,           // indulás előtti várakozás
-    });
-  }
+  // Szoba 5-9 cellára a játékos előtt
+  const rooms = maze.rooms;
+  const pcx = Math.round(camera.position.x / CELL);
+  const pcz = Math.round(camera.position.z / CELL);
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  let pool = rooms.filter(r => {
+    const rdx = r.cx - pcx, rdz = r.cz - pcz;
+    const d = Math.sqrt(rdx*rdx + rdz*rdz);
+    if (d < 5 || d > 9) return false;
+    return (rdx * fx + rdz * fz) > 0; // játékos előtt
+  });
+  if (pool.length === 0) pool = rooms.filter(r => {
+    const rdx = r.cx - pcx, rdz = r.cz - pcz;
+    const d = Math.sqrt(rdx*rdx + rdz*rdz);
+    return d >= 5 && d <= 10;
+  });
+  if (pool.length === 0) return;
+
+  const rm = pool[(Math.random() * pool.length) | 0];
+  scene.remove(m.mesh);
+  monsters.splice(0, 1);
+  spawnOneMonster(rm.cx, rm.cz, true); // azonnal üldöz
 }
 
 const DETECT_DIST = 27; // ennyi world unit-on belül meglát
-const CHASE_SPEED = 5.5;
-const WANDER_SPEED = 0.9;
+const CHASE_SPEED = 8.25;
+const WANDER_SPEED = 1.35;
 
 function updateMonsters(dt) {
   for (const m of monsters) {
@@ -1073,8 +1102,7 @@ function updateMonsters(dt) {
     const pdz = camera.position.z - m.mesh.position.z;
     const playerDist = Math.sqrt(pdx*pdx + pdz*pdz);
 
-    // Látásvizsgálat — passive példányok nem üldöznek
-    if (!m.passive) {
+    {
       if (playerDist < DETECT_DIST) m.chasing = true;
       if (playerDist > DETECT_DIST * 2) m.chasing = false;
     }
@@ -1125,8 +1153,8 @@ function updateMonsters(dt) {
       const spd = CHASE_SPEED * dt / playerDist;
       const mx = m.mesh.position.x, mz = m.mesh.position.z;
       const nx = mx + pdx * spd, nz = mz + pdz * spd;
-      const moveX = canMove(nx, mz);
-      const moveZ = canMove(mx, nz);
+      const moveX = canMove(nx, mz, 1.1);
+      const moveZ = canMove(mx, nz, 1.1);
       if (moveX) m.mesh.position.x = nx;
       if (moveZ) m.mesh.position.z = nz;
       // Ha mindkét irányban blokkolva: próbálj csúszni az elérhető tengelyen
@@ -1203,7 +1231,6 @@ let dead = false;
 function checkDeath() {
   if (dead) return;
   for (const m of monsters) {
-    if (m.passive) continue;
     const dx = m.mesh.position.x - camera.position.x;
     const dz = m.mesh.position.z - camera.position.z;
     if (dx*dx + dz*dz < 2.8*2.8) {
@@ -1296,7 +1323,7 @@ function loop() {
   camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
   updateLights();
-  if (!dead) { updateMonsters(dt); checkDeath(); }
+  if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); }
   else { updateMonsterAnims(); }
 
   if (dead && deathAnimStart !== null) {
