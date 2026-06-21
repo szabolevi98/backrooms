@@ -183,7 +183,10 @@ canvas { display: block; }
 
 /* ── CRT / VHS overlay ── */
 #crt {
-  position: fixed; inset: 0; z-index: 2; cursor: crosshair;
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+}
+#click-catcher {
+  position: fixed; inset: 0; z-index: 3; cursor: crosshair;
 }
 #topleft   { z-index: 10; }
 #info      { z-index: 10; }
@@ -245,8 +248,9 @@ canvas { display: block; }
 </svg>
 
 <canvas id="crt"></canvas>
+<div id="click-catcher"></div>
 
-<div id="pause" onclick="if(started){showPause(false);crtCanvas.requestPointerLock();}">
+<div id="pause" onclick="if(started){showPause(false);document.getElementById('click-catcher').requestPointerLock();}">
   <p>PAUSED — CLICK TO RESUME</p>
 </div>
 
@@ -409,7 +413,7 @@ const maze     = new Level();
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.domElement.style.display = 'none'; // hidden — CRT canvas composites it
+renderer.domElement.style.cssText = 'position:fixed;inset:0;z-index:1;';
 document.body.insertBefore(renderer.domElement, document.getElementById('ui'));
 
 const crtCanvas = document.getElementById('crt');
@@ -763,18 +767,18 @@ document.addEventListener('mousemove', e => {
   pitch  = Math.max(-1.1, Math.min(1.1, pitch));
 });
 document.addEventListener('pointerlockchange', () => {
-  locked = document.pointerLockElement === crtCanvas;
+  locked = document.pointerLockElement === document.getElementById('click-catcher');
   if (!locked && started && !paused && !isMobile && !dead) showPause(true);
 });
-crtCanvas.addEventListener('click', () => {
+document.getElementById('click-catcher').addEventListener('click', () => {
   if (!started || isMobile) return;
   if (paused) showPause(false);
-  crtCanvas.requestPointerLock();
+  document.getElementById('click-catcher').requestPointerLock();
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Escape' && started) {
     if (locked) { document.exitPointerLock(); showPause(true); }
-    else        { showPause(false); crtCanvas.requestPointerLock(); }
+    else        { showPause(false); document.getElementById('click-catcher').requestPointerLock(); }
   }
 });
 function showPause(on) {
@@ -857,7 +861,7 @@ enterBtn.addEventListener('click', async () => {
   document.getElementById('overlay').style.display = 'none';
   started = true;
   timerStart = performance.now();
-  if (!isMobile) crtCanvas.requestPointerLock();
+  if (!isMobile) document.getElementById('click-catcher').requestPointerLock();
   prev = performance.now();
   requestAnimationFrame(loop);
 });
@@ -1259,23 +1263,11 @@ function drawCRT(now) {
   flickerVal = Math.max(0.88, Math.min(1.0, flickerVal));
   const bright = flickerVal;
 
-  // — base image —
-  const ab = 2.5; // chromatic aberration pixel shift
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = bright;
-  ctx.drawImage(glCanvas, 0, 0, W, H);
-  ctx.globalAlpha = 1.0;
-
-  // — chromatic aberration fringes (additive on top of base) —
-  ctx.globalCompositeOperation = 'screen';
-  ctx.globalAlpha = 0.22;
-  ctx.filter = 'url(#crt-red)';
-  ctx.drawImage(glCanvas, -ab, 0, W, H);
-  ctx.filter = 'url(#crt-blue)';
-  ctx.drawImage(glCanvas, ab, 0, W, H);
-  ctx.filter = 'none';
-  ctx.globalAlpha = 1.0;
-  ctx.globalCompositeOperation = 'source-over';
+  // — screen flicker: subtle brightness dip via dark overlay —
+  if (flickerVal < 0.97) {
+    ctx.fillStyle = `rgba(0,0,0,${(1 - flickerVal) * 0.5})`;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   // — scanlines —
   ctx.globalCompositeOperation = 'multiply';
