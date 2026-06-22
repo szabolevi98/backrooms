@@ -320,6 +320,45 @@ function zoneOpen(x, z) {
   return posHash(bx, bz, 0xAA11BB22);
 }
 
+// ── Mennyezetmagasság zónánként (6×6 blokk, diszkrét lépcsők a tiszta átmenetért) ──
+// A falak mindig CEIL_MAX magasak, a mennyezetlap cellánként ezen az értéken van,
+// így a magasabb falrész a mennyezet fölött rejtve marad — nincs rés.
+// (CEIL_HIGH/MAX a H definíciója mellett, lentebb.)
+function zoneCeil(x, z) {
+  const bx = Math.floor(x / 6), bz = Math.floor(z / 6);
+  const r = posHash(bx, bz, 0xCE11BABE);
+  if (r < 0.22) return CEIL_HIGH;   // magas csarnok-zóna
+  return H;                          // alap magasság (eredeti) — soha nem alacsonyabb
+}
+
+// ── Sötét zóna (7×7 blokk) — itt halvány a megvilágítás, sok halott lámpa ──
+function zoneDark(x, z) {
+  return posHash(Math.floor(x/7), Math.floor(z/7), 0xDA2C0DE) < 0.22;
+}
+// ── Villódzó zóna (5×5 blokk) — itt a lámpák hibásan villognak ──
+function zoneFlicker(x, z) {
+  return posHash(Math.floor(x/5), Math.floor(z/5), 0xF11C4E2) < 0.20;
+}
+
+// Lámpa-állapot egy cellában: 'none' | 'on' | 'dead' | 'flicker'
+function lightState(x, z) {
+  if (!hasLight(x, z)) return 'none';           // nincs panel
+  // Villogó panel CSAK rácscellában lehet (ahol a fény-pool lámpája is ülhet),
+  // különben villogna a panel, de a fal nem. Máshol a 'flicker' → 'on'.
+  const onGrid = (x % LIGHT_STEP === 0) && (z % LIGHT_STEP === 0);
+  const r = posHash(x, z, 0x1E5712);
+  let s;
+  if (zoneDark(x, z)) {                          // sötét zóna: legtöbb halott
+    s = r < 0.72 ? 'dead' : (r < 0.88 ? 'flicker' : 'on');
+  } else if (zoneFlicker(x, z)) {                 // villódzó zóna
+    s = r < 0.55 ? 'flicker' : (r < 0.65 ? 'dead' : 'on');
+  } else {
+    s = r < 0.07 ? 'dead' : (r < 0.12 ? 'flicker' : 'on');
+  }
+  if (s === 'flicker' && !onGrid) s = 'on';      // villogás csak rácscellában
+  return s;
+}
+
 // Faltípus egy adott élhez (0=FULL, 1=HALF_BOT, 2=HANG_TOP, 3=WINDOW)
 // FONTOS: egy fal két cella között van megosztva — a típust KANONIKUS él-kulcs
 // alapján sorsoljuk (a két szomszéd közül a kisebb koordinátájú), hogy mindkét
@@ -376,8 +415,16 @@ class Level {
     const rooms = [];
 
     for (let attempt = 0; attempt < 400; attempt++) {
-      const rw = 2 + Math.floor(rng() * 4);  // 2–5 cella széles
-      const rh = 2 + Math.floor(rng() * 4);  // 2–5 cella magas
+      let rw, rh;
+      // ╔═ MÉRET-SZÉLSŐSÉGEK (KÍSÉRLETI — BIG_HALLS=false-szal kikapcsolható) ═╗
+      if (BIG_HALLS && rng() < 0.12) {
+        rw = 6 + Math.floor(rng() * 8);   // 6–13 cella — nagy csarnok
+        rh = 6 + Math.floor(rng() * 8);
+      } else {
+      // ╚═══════════════════ MÉRET-SZÉLSŐSÉGEK vége ═══════════════════════╝
+        rw = 2 + Math.floor(rng() * 4);   // 2–5 cella széles
+        rh = 2 + Math.floor(rng() * 4);   // 2–5 cella magas
+      }
       const rx = Math.round((rng() * 2 - 1) * (r - rw - 2));
       const rz = Math.round((rng() * 2 - 1) * (r - rh - 2));
 
@@ -393,11 +440,20 @@ class Level {
                    cx: rx + Math.floor(rw/2),
                    cz: rz + Math.floor(rh/2) });
 
+      // Oszlop-rácsos terem? (csak nagyobb szobáknál)
+      const gridRoom = rw >= 4 && rh >= 4 && rng() < 0.32;
+
       // Szoba belsejéből falak eltávolítása
       for (let cx = rx; cx < rx + rw; cx++) {
         for (let cz = rz; cz < rz + rh; cz++) {
           const c = this._get(cx, cz); if (!c) continue;
           c.rm = true;
+          if (gridRoom) {
+            c.gridRoom = true;
+            const lx = cx - rx, lz = cz - rz;
+            // belső rács-csomópontok (perem nélkül, 2 cellánként)
+            if (lx % 2 === 1 && lz % 2 === 1 && lx < rw - 1 && lz < rh - 1) c.gridCol = true;
+          }
           if (cx < rx + rw - 1) { c.e = false; const r2 = this._get(cx+1,cz); if (r2) r2.w = false; }
           if (cz < rz + rh - 1) { c.s = false; const r2 = this._get(cx,cz+1); if (r2) r2.n = false; }
         }
@@ -453,6 +509,10 @@ const MAZE_R   = 55;
 const RUN_SEED = (Math.random() * 0xFFFFFFFF) >>> 0;
 const maze     = new Level();
 
+// KÍSÉRLETI: méret-szélsőségek (néhány nagy csarnok). Tesztelés után
+// false-ra állítva kikapcsolható, vagy a generate-ben jelölt blokk törölhető.
+const BIG_HALLS = true;
+
 // ═══════════════════════════════════════════════
 //  THREE.JS
 // ═══════════════════════════════════════════════
@@ -495,6 +555,11 @@ const pillarMat = new THREE.MeshLambertMaterial({ color: 0xddc040 });
 const CELL = 5.0;
 const H    = 2.85;
 
+// Mennyezetmagasság-szintek a zóna-variációhoz (lásd zoneCeil)
+// Az alap mindig H (eredeti); egyes zónák ENNÉL magasabbak, sosem alacsonyabbak.
+const CEIL_HIGH = H * 1.25;   // ~3.56 — magas csarnok
+const CEIL_MAX  = H * 1.30;   // falmagasság (a mennyezet mindig ez alatt van)
+
 const W  = CELL + 0.14;
 const T  = 0.13;          // fal vastagsága
 const HH = H * 0.48;      // félmagasság (alacsony elválasztó)
@@ -504,9 +569,9 @@ const WT = H - 1.90;      // ablak teteje feletti rész magassága
 
 const floorGeo    = new THREE.PlaneGeometry(CELL, CELL);
 const ceilGeo     = new THREE.PlaneGeometry(CELL, CELL);
-// FULL falak
-const wallHGeo    = new THREE.BoxGeometry(W,  H,  T);
-const wallVGeo    = new THREE.BoxGeometry(T,  H,  W);
+// FULL falak — mindig CEIL_MAX magasak, a fölösleg a mennyezet fölött rejtve
+const wallHGeo    = new THREE.BoxGeometry(W,  CEIL_MAX,  T);
+const wallVGeo    = new THREE.BoxGeometry(T,  CEIL_MAX,  W);
 // HALF_BOT — alacsony félfal alulról
 const wallHHalfGeo = new THREE.BoxGeometry(W, HH, T);
 const wallVHalfGeo = new THREE.BoxGeometry(T, HH, W);
@@ -515,12 +580,12 @@ const wallHTopGeo  = new THREE.BoxGeometry(W, HT, T);
 const wallVTopGeo  = new THREE.BoxGeometry(T, HT, W);
 
 const fixGeo    = new THREE.BoxGeometry(1.7, 0.05, 1.7);  // négyzetes fénypanel
-const pillarGeo = new THREE.BoxGeometry(0.28, H, 0.28);
+const pillarGeo = new THREE.BoxGeometry(0.28, CEIL_MAX, 0.28);
 
 // ── BACKROOMS architektúra extrák ──
 // Szabadon álló oszlop (ikonikus pillér) bázis/fejezet peremmel
 const COL_W     = 0.92;
-const colGeo    = new THREE.BoxGeometry(COL_W, H, COL_W);
+const colGeo    = new THREE.BoxGeometry(COL_W, CEIL_MAX, COL_W);
 const colCapGeo = new THREE.BoxGeometry(COL_W + 0.24, 0.16, COL_W + 0.24);
 
 // Félfal tetejére kapaszkodó / korlát (fa szín)
@@ -541,12 +606,24 @@ const LINTEL_H   = 0.85;
 const lintelHGeo = new THREE.BoxGeometry(W, LINTEL_H, T * 2.4);
 const lintelVGeo = new THREE.BoxGeometry(T * 2.4, LINTEL_H, W);
 
+// Mennyezet-lépcső kitöltő (riser): a magasabb zóna szélén lezárja a rést,
+// hogy ne lássunk ki a semmibe. H-tól CEIL_MAX-ig ér: a teteje a plafon fölé
+// (rejtett zóna) nyúlik, így a felső lapja nem esik egy síkba a mennyezettel
+// (különben z-fighting villogás). Vékony, a magas cella felé tolva.
+const RISER_H    = CEIL_MAX - H;
+const riserHGeo  = new THREE.BoxGeometry(W, RISER_H, T);
+const riserVGeo  = new THREE.BoxGeometry(T, RISER_H, W);
+
 // Anyagok az extrákhoz
 const railMat   = new THREE.MeshLambertMaterial({ color: 0x9c6233 }); // meleg fa kapaszkodó
 const trimMat   = new THREE.MeshLambertMaterial({ color: 0xf2ead0 }); // világos szegély/perem
 
 // Oszlop-cellák halmaza ütközéshez (buildWorld tölti fel)
 const columnCells = new Set();
+
+// Villódzó fénypanelek (buildWorld tölti fel, a loop animálja)
+let fixMeshRef = null;
+const flickerList = []; // { i, phase }
 
 // Point light POOL — mobil WebGL nem bír sok dinamikus fényt a Lambert
 // shaderben (uniform-limit), ezért csak pár fény van, ami a játékos köré
@@ -561,16 +638,49 @@ for (let i = 0; i < (LIGHT_POOL_R * 2 + 1) ** 2; i++) {
   LIGHT_POOL.push(pl);
 }
 
-function updateLights() {
+// Közös villódzás-szint egy adott fázishoz és időhöz (0.16 = halvány, 1.0 = ég).
+// Ugyanezt használja a panel ÉS a hozzá tartozó megvilágítás → szinkronban villognak.
+function flickerFromPhase(phase, t) {
+  const a = Math.sin(t * 19 + phase) + Math.sin(t * 7 + phase * 1.7);
+  return a > 0.4 ? 1.0 : 0.16;
+}
+
+function updateLights(now) {
   // legközelebbi rácspont a játékos alatt (rács maze-coordban LIGHT_STEP-enként)
   const gx = Math.round(camera.position.x / CELL / LIGHT_STEP) * LIGHT_STEP;
   const gz = Math.round(camera.position.z / CELL / LIGHT_STEP) * LIGHT_STEP;
+  const t = (now || 0) * 0.001;
   let k = 0;
   for (let dx = -LIGHT_POOL_R; dx <= LIGHT_POOL_R; dx++)
     for (let dz = -LIGHT_POOL_R; dz <= LIGHT_POOL_R; dz++) {
       const pl = LIGHT_POOL[k++];
-      pl.position.set((gx + dx * LIGHT_STEP) * CELL, H - 0.2, (gz + dz * LIGHT_STEP) * CELL);
+      const cx = gx + dx * LIGHT_STEP, cz = gz + dz * LIGHT_STEP;
+      const ch = zoneCeil(cx, cz);
+      pl.position.set(cx * CELL, ch - 0.2, cz * CELL);
+      // a rácscellában lévő lámpa állapotát követi — a paneljével SZINKRONBAN
+      // (villogó panel csak rácscellában lehet, lásd lightState → így mindig egyezik)
+      let inten = zoneDark(cx, cz) ? 0.07 : 0.30;
+      const ls = lightState(cx, cz);
+      if (ls === 'dead') inten *= 0.12;
+      else if (ls === 'flicker') inten *= flickerFromPhase(posHash(cx, cz, 0x7E5) * 6.28, t);
+      pl.intensity = inten;
     }
+}
+
+// Villódzó fénypanelek anyagszínének animálása (a látható panelek pislognak)
+const fixCol = new THREE.Color();
+let _lastFlick = 0;
+function updateFlicker(now) {
+  if (!fixMeshRef || flickerList.length === 0) return;
+  if (now - _lastFlick < 60) return;   // ~16/mp — elég a villódzáshoz, kíméli a GPU-t
+  _lastFlick = now;
+  const t = now * 0.001;
+  for (const f of flickerList) {
+    const b = flickerFromPhase(f.phase, t);
+    fixCol.setRGB(b, b, b * 1.04);
+    fixMeshRef.setColorAt(f.i, fixCol);
+  }
+  if (fixMeshRef.instanceColor) fixMeshRef.instanceColor.needsUpdate = true;
 }
 
 // ═══════════════════════════════════════════════
@@ -616,6 +726,9 @@ async function buildWorld(onProgress) {
   // AJTÓ-ÁTHIDALÓ (soffit a nyílások felett)
   const lintelHIM   = new THREE.InstancedMesh(lintelHGeo,    wallMat,   maxW);
   const lintelVIM   = new THREE.InstancedMesh(lintelVGeo,    wallMat,   maxW);
+  // MENNYEZET-LÉPCSŐ kitöltő (riser) a magas zónák szélén
+  const riserHIM    = new THREE.InstancedMesh(riserHGeo,     wallMat,   maxW);
+  const riserVIM    = new THREE.InstancedMesh(riserVGeo,     wallMat,   maxW);
   // SZABADON ÁLLÓ OSZLOP + perem
   const colIM       = new THREE.InstancedMesh(colGeo,        pillarMat, total);
   const colCapIM    = new THREE.InstancedMesh(colCapGeo,     trimMat,   total * 2);
@@ -625,14 +738,17 @@ async function buildWorld(onProgress) {
 
   [floorIM, ceilIM, wallHIM, wallVIM, wallHHalfIM, wallVHalfIM,
    wallHTopIM, wallVTopIM, winHBotIM, winHTopIM, winVBotIM, winVTopIM,
-   railHIM, railVIM, lintelHIM, lintelVIM, colIM, colCapIM, fixIM, pillarIM
+   railHIM, railVIM, lintelHIM, lintelVIM, riserHIM, riserVIM, colIM, colCapIM, fixIM, pillarIM
   ].forEach(m => { m.frustumCulled = false; });
 
   const dummy = new THREE.Object3D();
+  const col   = new THREE.Color();
+  fixMeshRef = fixIM; flickerList.length = 0;
   let fi = 0, ci = 0, whi = 0, wvi = 0;
   let whhi = 0, wvhi = 0, whti = 0, wvti = 0;
   let nwhb = 0, nwht = 0, nwvb = 0, nwvt = 0;
   let nrh = 0, nrv = 0, nlh = 0, nlv = 0, nco = 0, ncc = 0;
+  let nrih = 0, nriv = 0;
   let fxi = 0, pi = 0;
   const half = CELL / 2;
 
@@ -648,44 +764,64 @@ async function buildWorld(onProgress) {
       const [mx, mz] = cells[j];
       const wx = mx * CELL, wz = mz * CELL;
       const w  = maze.walls(mx, mz);
+      const cellH = zoneCeil(mx, mz);   // cellánkénti mennyezetmagasság
 
-      // Floor
+      // Floor — néhány cella elszíneződött / foltos szőnyeg
       dummy.position.set(wx, 0, wz);
       dummy.rotation.set(-Math.PI / 2, 0, 0);
       dummy.updateMatrix();
-      floorIM.setMatrixAt(fi++, dummy.matrix);
+      const fIdx = fi++;
+      floorIM.setMatrixAt(fIdx, dummy.matrix);
+      const fr = posHash(mx, mz, 0x5707F100);
+      if (fr < 0.10)      col.setRGB(0.62, 0.60, 0.52); // sötét nedvesség-folt
+      else if (fr < 0.18) col.setRGB(0.78, 0.75, 0.64); // halvány elszíneződés
+      else if (fr < 0.24) col.setRGB(1.06, 1.02, 0.92); // kifakult világos folt
+      else                col.setRGB(1, 1, 1);
+      floorIM.setColorAt(fIdx, col);
 
-      // Ceiling
-      dummy.position.set(wx, H, wz);
+      // Ceiling — cellánkénti magasságon
+      dummy.position.set(wx, cellH, wz);
       dummy.rotation.set(Math.PI / 2, 0, 0);
       dummy.updateMatrix();
       ceilIM.setMatrixAt(ci++, dummy.matrix);
+
+      // Mennyezet-lépcső kitöltő: ha ez magas zóna és a szomszéd alacsonyabb +
+      // nyitott él → lezárjuk a függőleges rést (különben kilátni a semmibe)
+      if (cellH > H) {
+        const midY = (H + CEIL_MAX) / 2;   // a teteje a plafon fölé nyúlik (rejtve)
+        const off = T / 2;                  // a magas cella belseje felé tolva
+        dummy.rotation.set(0, 0, 0);
+        if (!w.n && zoneCeil(mx, mz-1) < cellH) { dummy.position.set(wx,           midY, wz - half + off); dummy.updateMatrix(); riserHIM.setMatrixAt(nrih++, dummy.matrix); }
+        if (!w.s && zoneCeil(mx, mz+1) < cellH) { dummy.position.set(wx,           midY, wz + half - off); dummy.updateMatrix(); riserHIM.setMatrixAt(nrih++, dummy.matrix); }
+        if (!w.e && zoneCeil(mx+1, mz) < cellH) { dummy.position.set(wx + half - off, midY, wz           ); dummy.updateMatrix(); riserVIM.setMatrixAt(nriv++, dummy.matrix); }
+        if (!w.w && zoneCeil(mx-1, mz) < cellH) { dummy.position.set(wx - half + off, midY, wz           ); dummy.updateMatrix(); riserVIM.setMatrixAt(nriv++, dummy.matrix); }
+      }
 
       // Walls — típusonként elhelyezve
       dummy.rotation.set(0, 0, 0);
       const placeWall = (isH, px, pz, dir) => {
         const t = wallType(mx, mz, dir);
         if (isH) {
-          if (t === 0) { dummy.position.set(px, H/2,         pz); dummy.updateMatrix(); wallHIM.setMatrixAt(whi++, dummy.matrix); }
+          if (t === 0) { dummy.position.set(px, CEIL_MAX/2,   pz); dummy.updateMatrix(); wallHIM.setMatrixAt(whi++, dummy.matrix); }
           else if (t === 1) {
             dummy.position.set(px, HH/2, pz); dummy.updateMatrix(); wallHHalfIM.setMatrixAt(whhi++, dummy.matrix);
             dummy.position.set(px, HH + RAIL_T/2, pz); dummy.updateMatrix(); railHIM.setMatrixAt(nrh++, dummy.matrix);
           }
-          else if (t === 2) { dummy.position.set(px, H - HT/2,    pz); dummy.updateMatrix(); wallHTopIM.setMatrixAt(whti++, dummy.matrix); }
+          else if (t === 2) { dummy.position.set(px, cellH - HT/2,    pz); dummy.updateMatrix(); wallHTopIM.setMatrixAt(whti++, dummy.matrix); }
           else { // 3 = ablakos fal
-            dummy.position.set(px, WIN_SILL/2, pz);     dummy.updateMatrix(); winHBotIM.setMatrixAt(nwhb++, dummy.matrix);
-            dummy.position.set(px, H - WIN_HEAD/2, pz); dummy.updateMatrix(); winHTopIM.setMatrixAt(nwht++, dummy.matrix);
+            dummy.position.set(px, WIN_SILL/2, pz);          dummy.updateMatrix(); winHBotIM.setMatrixAt(nwhb++, dummy.matrix);
+            dummy.position.set(px, cellH - WIN_HEAD/2, pz);  dummy.updateMatrix(); winHTopIM.setMatrixAt(nwht++, dummy.matrix);
           }
         } else {
-          if (t === 0) { dummy.position.set(px, H/2,      pz); dummy.updateMatrix(); wallVIM.setMatrixAt(wvi++, dummy.matrix); }
+          if (t === 0) { dummy.position.set(px, CEIL_MAX/2,   pz); dummy.updateMatrix(); wallVIM.setMatrixAt(wvi++, dummy.matrix); }
           else if (t === 1) {
             dummy.position.set(px, HH/2, pz); dummy.updateMatrix(); wallVHalfIM.setMatrixAt(wvhi++, dummy.matrix);
             dummy.position.set(px, HH + RAIL_T/2, pz); dummy.updateMatrix(); railVIM.setMatrixAt(nrv++, dummy.matrix);
           }
-          else if (t === 2) { dummy.position.set(px, H - HT/2, pz); dummy.updateMatrix(); wallVTopIM.setMatrixAt(wvti++, dummy.matrix); }
+          else if (t === 2) { dummy.position.set(px, cellH - HT/2, pz); dummy.updateMatrix(); wallVTopIM.setMatrixAt(wvti++, dummy.matrix); }
           else { // 3 = ablakos fal
-            dummy.position.set(px, WIN_SILL/2, pz);     dummy.updateMatrix(); winVBotIM.setMatrixAt(nwvb++, dummy.matrix);
-            dummy.position.set(px, H - WIN_HEAD/2, pz); dummy.updateMatrix(); winVTopIM.setMatrixAt(nwvt++, dummy.matrix);
+            dummy.position.set(px, WIN_SILL/2, pz);          dummy.updateMatrix(); winVBotIM.setMatrixAt(nwvb++, dummy.matrix);
+            dummy.position.set(px, cellH - WIN_HEAD/2, pz);  dummy.updateMatrix(); winVTopIM.setMatrixAt(nwvt++, dummy.matrix);
           }
         }
       };
@@ -694,12 +830,26 @@ async function buildWorld(onProgress) {
       if (w.e) placeWall(false, wx + half, wz,        2);
       if (w.w) placeWall(false, wx - half, wz,        3);
 
-      // Fixture
-      if (hasLight(mx, mz)) {
-        dummy.position.set(wx, H - 0.04, wz);
+      // Lesz-e szabadon álló oszlop ebben a cellában? (a lámpa ezt kihagyja)
+      const cellObj = maze._get(mx, mz);
+      const isGridCol = cellObj && cellObj.gridCol;
+      const isRandCol = !(cellObj && cellObj.gridRoom) &&
+            maze.isRoom(mx, mz) && !w.n && !w.s && !w.e && !w.w &&
+            posHash(mx, mz, 0x9753) < 0.18;
+      const hasColumn = (isGridCol || isRandCol) && (Math.abs(mx) > 1 || Math.abs(mz) > 1);
+
+      // Fixture — fénypanel állapottal (ég / halott / villódzó); oszlop fölé soha
+      const ls = hasColumn ? 'none' : lightState(mx, mz);
+      if (ls !== 'none') {
+        dummy.position.set(wx, cellH - 0.04, wz);
         dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        fixIM.setMatrixAt(fxi++, dummy.matrix);
+        const fIdx2 = fxi++;
+        fixIM.setMatrixAt(fIdx2, dummy.matrix);
+        if (ls === 'dead') col.setRGB(0.13, 0.13, 0.16);       // kiégett, sötét panel
+        else               col.setRGB(1, 1, 1);                 // ég (a villódzót a loop animálja)
+        fixIM.setColorAt(fIdx2, col);
+        if (ls === 'flicker') flickerList.push({ i: fIdx2, phase: posHash(mx, mz, 0x7E5) * 6.28 });
       }
 
       // Pillérek a sarokpontokon ahol falak találkoznak
@@ -712,7 +862,7 @@ async function buildWorld(onProgress) {
       for (const c of corners) {
         const wallCount = c.walls.filter(Boolean).length;
         if (wallCount >= 2) {
-          dummy.position.set(wx + c.ox, H/2, wz + c.oz);
+          dummy.position.set(wx + c.ox, CEIL_MAX/2, wz + c.oz);
           dummy.rotation.set(0, 0, 0);
           dummy.updateMatrix();
           pillarIM.setMatrixAt(pi++, dummy.matrix);
@@ -720,8 +870,9 @@ async function buildWorld(onProgress) {
       }
 
       // Ajtó-áthidalók (soffit) szoba-szoba nyílások felett — küszöbhatás
+      // (a teteje kicsit a plafon fölé nyúlik, hogy ne legyen egysíkú = z-fighting)
       dummy.rotation.set(0, 0, 0);
-      const topY = H - LINTEL_H / 2;
+      const topY = cellH - LINTEL_H / 2 + 0.06;
       if (!w.n && maze.isRoom(mx, mz) && maze.isRoom(mx, mz-1) && posHash(mx, mz, 0x1111) < 0.5) {
         dummy.position.set(wx, topY, wz - half); dummy.updateMatrix(); lintelHIM.setMatrixAt(nlh++, dummy.matrix);
       }
@@ -729,13 +880,11 @@ async function buildWorld(onProgress) {
         dummy.position.set(wx - half, topY, wz); dummy.updateMatrix(); lintelVIM.setMatrixAt(nlv++, dummy.matrix);
       }
 
-      // Szabadon álló oszlop nyílt szoba-cella közepén (ikonikus backrooms pillér)
-      if (maze.isRoom(mx, mz) && !w.n && !w.s && !w.e && !w.w &&
-          (Math.abs(mx) > 1 || Math.abs(mz) > 1) &&
-          posHash(mx, mz, 0x9753) < 0.18) {
-        dummy.position.set(wx, H/2, wz);        dummy.updateMatrix(); colIM.setMatrixAt(nco++, dummy.matrix);
-        dummy.position.set(wx, 0.08, wz);       dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
-        dummy.position.set(wx, H - 0.08, wz);   dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
+      // Szabadon álló oszlop: oszlop-rácsos terem csomópontján VAGY szórványosan nyílt szobában
+      if (hasColumn) {
+        dummy.position.set(wx, CEIL_MAX/2, wz);   dummy.updateMatrix(); colIM.setMatrixAt(nco++, dummy.matrix);
+        dummy.position.set(wx, 0.08, wz);         dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
+        dummy.position.set(wx, cellH - 0.08, wz); dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
         columnCells.add(mx + ',' + mz);
       }
     }
@@ -750,12 +899,14 @@ async function buildWorld(onProgress) {
     [wallHTopIM, whti], [wallVTopIM, wvti],
     [winHBotIM, nwhb], [winHTopIM, nwht], [winVBotIM, nwvb], [winVTopIM, nwvt],
     [railHIM, nrh], [railVIM, nrv], [lintelHIM, nlh], [lintelVIM, nlv],
+    [riserHIM, nrih], [riserVIM, nriv],
     [colIM, nco], [colCapIM, ncc],
     [fixIM, fxi], [pillarIM, pi],
   ];
   for (const [m, cnt] of allIM) {
     m.count = cnt;
     m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
     scene.add(m);
   }
 }
@@ -1683,7 +1834,8 @@ function loop() {
 
   camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
-  updateLights();
+  updateLights(now);
+  updateFlicker(now);
   if (!dead) { updateMonsters(dt); checkDeath(); checkRespawn(dt); checkCamping(dt); if (!dead) checkDeath(); }
   else { updateMonsterAnims(); }
 
