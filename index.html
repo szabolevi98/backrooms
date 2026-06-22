@@ -1013,6 +1013,16 @@ enterBtn.addEventListener('click', async () => {
     }
   }
 
+  // Kezdőszoba összekötése a labirintussal — különben izolált dobozban ragadunk
+  if (maze.rooms && maze.rooms.length) {
+    let nearest = null, bd = Infinity;
+    for (const rm of maze.rooms) {
+      const d = Math.abs(rm.cx) + Math.abs(rm.cz);
+      if (d < bd) { bd = d; nearest = rm; }
+    }
+    if (nearest) maze._corridor(0, 0, nearest.cx, nearest.cz);
+  }
+
   await buildWorld(p => {
     progressBar.style.width = Math.min(100, Math.round(p * 100)) + '%';
     progressLbl.textContent = 'GENERATING… ' + Math.min(100, Math.round(p * 100)) + '%';
@@ -1293,22 +1303,27 @@ function updateMonsters(dt) {
       const mx = m.mesh.position.x, mz = m.mesh.position.z;
       const step = CHASE_SPEED * dt;
 
+      // Ha a közelmúltban beragadt, kényszerített útkeresés akkor is, ha lát
+      m.forcePathT = (m.forcePathT || 0) - dt;
+      const usePath = !los || m.forcePathT > 0;
+
       // Cél: ha látja → a játékos; ha nem → az utolsó ismert pozíció
       const tgtX = los ? camera.position.x : m.lastSeenX;
       const tgtZ = los ? camera.position.z : m.lastSeenZ;
 
       let dirX, dirZ;
-      if (los) {
+      if (!usePath) {
         // Tiszta rálátás → egyenesen rárohan
         dirX = pdx / playerDist;
         dirZ = pdz / playerDist;
         m.path = null;
       } else {
-        // Nem látja → BFS az utolsó ismert pozícióhoz
+        // BFS a cél felé (látott játékos vagy utolsó ismert pozíció)
         const tdx = tgtX - mx, tdz = tgtZ - mz;
         const tdist = Math.sqrt(tdx*tdx + tdz*tdz);
         // Ha elérte az utolsó ismert helyet és még mindig nem lát → feladja
-        if (tdist < 1.5) { m.chasing = false; m.path = null; continue; }
+        // (csak ha tényleg nem látja; kényszerített útkeresésnél nem)
+        if (!los && tdist < 1.5) { m.chasing = false; m.path = null; continue; }
 
         const mcx = Math.round(mx / CELL), mcz = Math.round(mz / CELL);
         const pcx = Math.round(tgtX / CELL);
@@ -1346,6 +1361,16 @@ function updateMonsters(dt) {
       const moveZ = canMove(mx, nz, 1.1);
       if (moveX) m.mesh.position.x = nx;
       if (moveZ) m.mesh.position.z = nz;
+
+      // Beragadás-érzékelés: ha próbál mozogni de alig halad, kényszerített útkeresés
+      const moved = Math.hypot(m.mesh.position.x - mx, m.mesh.position.z - mz);
+      if (step > 0.0001 && moved < step * 0.35) {
+        m.stuckT = (m.stuckT || 0) + dt;
+        if (m.stuckT > 0.2) { m.forcePathT = 1.5; m.stuckT = 0; m.path = null; m.pathTimer = 0; }
+      } else {
+        m.stuckT = 0;
+      }
+
       m.mesh.rotation.y = Math.atan2(dirX, dirZ);
       m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.012)) * 0.12;
     } else {
@@ -1578,6 +1603,14 @@ function loop() {
     camera.rotation.order = 'YXZ';
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
+
+    // screen shake/jitter until animation completes
+    if (t < 1.0) {
+      const shakeAmt = 0.18 * (1 - t * 0.2);
+      camera.position.x += (Math.random() - 0.5) * shakeAmt * 2;
+      camera.position.y += (Math.random() - 0.5) * shakeAmt;
+      camera.position.z += (Math.random() - 0.5) * shakeAmt * 2;
+    }
 
     if (t >= 1.0 && !deathScreenShown) {
       deathScreenShown = true;
