@@ -11,5 +11,6 @@ Backrooms game written in Three.js, with procedural maze generation, monster AI,
 | `WASD` | Move |
 | Mouse | Look |
 | `Left Shift` | Sprint |
+| `C` | Crouch (duck under hanging walls) |
 | `M` | Mute / Unmute |
 | `ESC` | Pause |
