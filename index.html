@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Backrooms – Level 0</title>
+<title>Backrooms</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: monospace; }
@@ -59,6 +59,25 @@ canvas { display: block; }
 }
 #overlay .lvl  { color: #7a5c18; font-size: 13px; letter-spacing: 5px; }
 #overlay .desc { color: #5a4010; font-size: 11px; margin-top: 4px; letter-spacing: 2px; }
+
+#level-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.level-card {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 320px; background: none;
+  border: 1px solid #c8a83250; color: #c8a832;
+  padding: 14px 30px; font-family: monospace; cursor: pointer;
+  transition: all .25s; pointer-events: all;
+}
+.level-card:hover { background: #c8a83212; border-color: #c8a832aa; }
+.level-card:disabled { opacity: .4; cursor: default; pointer-events: none; }
+.lc-name { font-size: 14px; letter-spacing: 4px; }
+.lc-desc { font-size: 10px; letter-spacing: 2px; color: #7a5c18; }
+.lc-best { font-size: 10px; letter-spacing: 3px; color: #5a4010; margin-top: 2px; }
+/* Level 37 türkiz hangulat */
+.level-card[data-level="37"] { border-color: #3fb8a855; color: #8fd0c4; }
+.level-card[data-level="37"]:hover { background: #3fb8a812; border-color: #3fb8a8aa; }
+.level-card[data-level="37"] .lc-desc { color: #4a8a80; }
+.level-card[data-level="37"] .lc-best { color: #3a6a62; }
 #overlay button {
   margin-top: 18px; background: none;
   border: 1px solid #c8a83250; color: #c8a832;
@@ -137,7 +156,11 @@ canvas { display: block; }
   #overlay h1       { font-size: 9vw; letter-spacing: 4vw; }
   #overlay .lvl     { font-size: 3.2vw; letter-spacing: 2vw; }
   #overlay .desc    { font-size: 2.8vw; }
-  #overlay button   { font-size: 3.5vw; letter-spacing: 2vw; padding: 3.5vw 10vw; }
+  .level-card       { min-width: 70vw; padding: 3vw 6vw; }
+  .lc-name          { font-size: 3.6vw; letter-spacing: 1.5vw; }
+  .lc-desc          { font-size: 2.6vw; }
+  .lc-best          { font-size: 2.6vw; }
+  #settings .setting-row { font-size: 3vw; }
   #level-tag        { font-size: 3vw; letter-spacing: 1.5vw; padding: 3px 10px; }
   #timer            { font-size: 2.6vw; letter-spacing: 1vw; padding: 3px 10px; }
   #info             { display: none; }
@@ -223,9 +246,18 @@ canvas { display: block; }
 
 <div id="overlay">
   <h1>BACKROOMS</h1>
-  <div class="lvl">LEVEL  0  —  THE  LOBBY</div>
-  <div class="desc">you noclipped out of reality</div>
-  <button id="enter-btn">ENTER</button>
+  <div id="level-list">
+    <button class="level-card" data-level="0">
+      <span class="lc-name">LEVEL 0 — THE LOBBY</span>
+      <span class="lc-desc">you noclipped out of reality</span>
+      <span class="lc-best" id="best-0">BEST —:—</span>
+    </button>
+    <button class="level-card" data-level="37">
+      <span class="lc-name">LEVEL 37 — SUBLIMITY</span>
+      <span class="lc-desc">the poolrooms</span>
+      <span class="lc-best" id="best-37">BEST —:—</span>
+    </button>
+  </div>
   <div id="settings">
     <label class="setting-row" id="set-sound">
       <span class="setting-box" id="box-sound">✕</span>
@@ -337,10 +369,11 @@ function zoneOpen(x, z) {
 // így a magasabb falrész a mennyezet fölött rejtve marad — nincs rés.
 // (CEIL_HIGH/MAX a H definíciója mellett, lentebb.)
 function zoneCeil(x, z) {
-  const bx = Math.floor(x / 6), bz = Math.floor(z / 6);
-  const r = posHash(bx, bz, 0xCE11BABE);
-  if (r < 0.22) return CEIL_HIGH;   // magas csarnok-zóna
-  return H;                          // alap magasság (eredeti) — soha nem alacsonyabb
+  const L = LEVELS[currentLevel];
+  const base = H * ((L && L.ceilMul) ? L.ceilMul : 1);
+  if (L && L.ceilVary === false) return base;       // egyenletes belmagasság
+  const r = posHash(Math.floor(x / 6), Math.floor(z / 6), 0xCE11BABE);
+  return r < 0.22 ? base * 1.25 : base;             // néhol magasabb csarnok-zóna
 }
 
 // ── Sötét zóna (7×7 blokk) — itt halvány a megvilágítás, sok halott lámpa ──
@@ -417,7 +450,12 @@ class Level {
     return c ? !!c.rm : false;
   }
 
-  generate(r, rng) {
+  generate(r, rng, g) {
+    g = g || { bigHall: 0.12, bigMin: 6, bigMax: 13, roomMin: 2, roomMax: 5, gridChance: 0.32, extra: 0.30 };
+    const rngRange = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+    // a szobaszám-célt a térkép méretéhez igazítjuk (nagyobb szobák → kevesebb próba kell)
+    const attempts = 400;
+
     // 1. Minden cellát falakon zárt alapállapotba teszünk
     for (let x = -r; x <= r; x++)
       for (let z = -r; z <= r; z++)
@@ -426,16 +464,16 @@ class Level {
     // 2. Szobák elhelyezése (overlap ellenőrzéssel)
     const rooms = [];
 
-    for (let attempt = 0; attempt < 400; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       let rw, rh;
       // ╔═ MÉRET-SZÉLSŐSÉGEK (KÍSÉRLETI — BIG_HALLS=false-szal kikapcsolható) ═╗
-      if (BIG_HALLS && rng() < 0.12) {
-        rw = 6 + Math.floor(rng() * 8);   // 6–13 cella — nagy csarnok
-        rh = 6 + Math.floor(rng() * 8);
+      if (BIG_HALLS && rng() < g.bigHall) {
+        rw = rngRange(g.bigMin, g.bigMax);   // nagy csarnok
+        rh = rngRange(g.bigMin, g.bigMax);
       } else {
       // ╚═══════════════════ MÉRET-SZÉLSŐSÉGEK vége ═══════════════════════╝
-        rw = 2 + Math.floor(rng() * 4);   // 2–5 cella széles
-        rh = 2 + Math.floor(rng() * 4);   // 2–5 cella magas
+        rw = rngRange(g.roomMin, g.roomMax);
+        rh = rngRange(g.roomMin, g.roomMax);
       }
       const rx = Math.round((rng() * 2 - 1) * (r - rw - 2));
       const rz = Math.round((rng() * 2 - 1) * (r - rh - 2));
@@ -453,7 +491,7 @@ class Level {
                    cz: rz + Math.floor(rh/2) });
 
       // Oszlop-rácsos terem? (csak nagyobb szobáknál)
-      const gridRoom = rw >= 4 && rh >= 4 && rng() < 0.32;
+      const gridRoom = rw >= 4 && rh >= 4 && rng() < g.gridChance;
 
       // Szoba belsejéből falak eltávolítása
       for (let cx = rx; cx < rx + rw; cx++) {
@@ -490,9 +528,9 @@ class Level {
       connected.add(bj);
     }
 
-    // 4. Extra összekötések (~30%) a zsákutcák csökkentéséért
+    // 4. Extra összekötések a zsákutcák csökkentéséért (nyitottabb tér)
     for (let i = 0; i < rooms.length; i++) {
-      if (rng() < 0.30) {
+      if (rng() < g.extra) {
         const j = Math.floor(rng() * rooms.length);
         if (j !== i) this._corridor(rooms[i].cx, rooms[i].cz, rooms[j].cx, rooms[j].cz);
       }
@@ -526,6 +564,37 @@ const maze     = new Level();
 const BIG_HALLS = true;
 
 // ═══════════════════════════════════════════════
+//  SZINTEK (téma-konfigok)
+// ═══════════════════════════════════════════════
+const LEVELS = {
+  0: {
+    id: 0, name: 'LEVEL 0 — THE LOBBY', desc: 'you noclipped out of reality',
+    fog: 0xd4bc3a, fogD: 0.024,
+    amb: 0xfff4d8, ambI: 0.50, hemiSky: 0xfff6e0, hemiGnd: 0xb8a860, hemiI: 0.30,
+    wall: 0xe3c733, floor: 0xb89a30, ceil: 0x8a7420, pillar: 0xddc040,
+    rail: 0x9c6233, trim: 0xf2ead0, lightColor: 0xfff4d0,
+    tiled: false, tex: 'lobby', water: null, ui: '220,195,90', monster: 'bacteria',
+    ceilMul: 1, ceilVary: true,
+    // generálás: szűk folyosós labirintus, kis szobák
+    gen: { bigHall: 0.12, bigMin: 6, bigMax: 13, roomMin: 2, roomMax: 5,
+           gridChance: 0.32, extra: 0.30, waterChance: 0 },
+  },
+  37: {
+    id: 37, name: 'LEVEL 37 — SUBLIMITY', desc: 'the poolrooms',
+    fog: 0xb3d1c9, fogD: 0.018,
+    amb: 0xffffff, ambI: 0.53, hemiSky: 0xf2f9f6, hemiGnd: 0x98bab1, hemiI: 0.34,
+    wall: 0xe8eeea, floor: 0xd4ddd8, ceil: 0xedf3f0, pillar: 0xe1e8e4,
+    rail: 0xbdcbc6, trim: 0xf8fbf9, lightColor: 0xffffff,
+    tiled: true, tex: 'tile', water: { y: 0.55, color: 0x1f9e8c, opacity: 0.66 }, ui: '150,205,196', monster: 'humanoid',
+    ceilMul: 1.5, ceilVary: false,   // mindig +50% belmagasság, egyenletes
+    // generálás: tágas, nyitott, sok nagy csarnok + oszlop-rács, erősen összekötve
+    gen: { bigHall: 0.45, bigMin: 8, bigMax: 18, roomMin: 4, roomMax: 8,
+           gridChance: 0.78, extra: 0.6, waterChance: 0.52 },
+  },
+};
+let currentLevel = 0;
+
+// ═══════════════════════════════════════════════
 //  THREE.JS
 // ═══════════════════════════════════════════════
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -543,8 +612,8 @@ const scene  = new THREE.Scene();
 scene.fog    = new THREE.FogExp2(0xd4bc3a, 0.024);   // sárga pára
 scene.background = new THREE.Color(0xd4bc3a);
 
-scene.add(new THREE.AmbientLight(0xfff4d8, 0.50));
-scene.add(new THREE.HemisphereLight(0xfff6e0, 0xb8a860, 0.30));
+const ambLight  = new THREE.AmbientLight(0xfff4d8, 0.50); scene.add(ambLight);
+const hemiLight = new THREE.HemisphereLight(0xfff6e0, 0xb8a860, 0.30); scene.add(hemiLight);
 
 const camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.12, 160);
 camera.position.set(0, 1.72, 0);
@@ -569,8 +638,8 @@ const H    = 2.85;
 
 // Mennyezetmagasság-szintek a zóna-variációhoz (lásd zoneCeil)
 // Az alap mindig H (eredeti); egyes zónák ENNÉL magasabbak, sosem alacsonyabbak.
-const CEIL_HIGH = H * 1.25;   // ~3.56 — magas csarnok
-const CEIL_MAX  = H * 1.30;   // falmagasság (a mennyezet mindig ez alatt van)
+const CEIL_HIGH = H * 1.25;   // ~3.56 — magas csarnok (Level 0 variáció)
+const CEIL_MAX  = H * 1.60;   // falmagasság — a legmagasabb szintet is fedi (Level 37 = 1.5×H)
 
 const W  = CELL + 0.14;
 const T  = 0.13;          // fal vastagsága
@@ -648,6 +717,184 @@ for (let i = 0; i < (LIGHT_POOL_R * 2 + 1) ** 2; i++) {
   pl.position.set(0, H - 0.2, 0);
   scene.add(pl);
   LIGHT_POOL.push(pl);
+}
+
+// ═══════════════════════════════════════════════
+//  CSEMPE-TEXTÚRA (Level 37) + VÍZ + TÉMA-VÁLTÁS
+// ═══════════════════════════════════════════════
+function makeTileTexture() {
+  const s = 128;
+  const c = document.createElement('canvas'); c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, s, s);
+  // halvány kerámia-csillanás
+  const g = x.createLinearGradient(0, 0, s, s);
+  g.addColorStop(0, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(150,180,175,0.18)');
+  x.fillStyle = g; x.fillRect(0, 0, s, s);
+  // fuga (a csempék közti vonal) — a szél mentén, ismétléskor rácsot ad
+  x.strokeStyle = 'rgba(95,120,115,0.78)'; x.lineWidth = 7;
+  x.strokeRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const tileBase = makeTileTexture();
+function tileClone(rx, ry) {
+  const t = tileBase.clone();
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(rx, ry); t.needsUpdate = true;
+  return t;
+}
+const tileFloor  = tileClone(12, 12);
+const tileWall   = tileClone(11, 8);
+const tileCeil   = tileClone(12, 12);
+const tilePillar = tileClone(3, 9);
+
+// ── Level 0 textúrák: tapéta (fal), szőnyeg (padló), álmennyezet (plafon) ──
+// Fehér alap + sötét minta → az anyag színe (sárga) színezi.
+function makeWallpaperTexture() {
+  const s = 256, c = document.createElement('canvas'); c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, s, s);
+  // függőleges tapétacsíkok
+  for (let i = 0; i < s; i += 32) { x.fillStyle = 'rgba(0,0,0,0.045)'; x.fillRect(i, 0, 16, s); }
+  // halvány damaszt-motívum rombusz-rácsban
+  x.fillStyle = 'rgba(70,55,0,0.07)';
+  for (let yy = 0; yy <= s; yy += 64) for (let xx = 0; xx <= s; xx += 64) {
+    const ox = ((yy / 64) % 2) ? 32 : 0, px = xx + ox, py = yy;
+    for (const [dx, dy, r] of [[0,0,4],[0,-9,2.5],[0,9,2.5],[-7,0,2],[7,0,2]]) {
+      x.beginPath(); x.arc(px + dx, py + dy, r, 0, 6.2832); x.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+function makeCarpetTexture() {
+  const s = 128, c = document.createElement('canvas'); c.width = c.height = s;
+  const x = c.getContext('2d');
+  const img = x.createImageData(s, s), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {        // finom szálkás zaj
+    const n = 232 + (Math.random() * 23 | 0);
+    d[i] = d[i+1] = d[i+2] = n; d[i+3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  for (let i = 0; i < 45; i++) {                  // pár sötétebb folt
+    x.fillStyle = `rgba(0,0,0,${Math.random() * 0.05})`;
+    x.beginPath(); x.arc(Math.random()*s, Math.random()*s, 4 + Math.random()*14, 0, 6.2832); x.fill();
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+const wpBase     = makeWallpaperTexture();
+const carpetBase = makeCarpetTexture();
+function texClone(base, rx, ry) { const t = base.clone(); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); t.needsUpdate = true; return t; }
+const wpWall      = texClone(wpBase, 2, 2.2);
+const wpPillar    = texClone(wpBase, 1, 3);
+const carpetFloor = texClone(carpetBase, 4, 4);
+const ceilLobby   = texClone(tileBase, 4, 4);    // álmennyezet panelrács
+
+// Textúra-készletek szintenként
+const TEX = {
+  tile:  { wall: tileWall, floor: tileFloor,  ceil: tileCeil,   pillar: tilePillar },
+  lobby: { wall: wpWall,   floor: carpetFloor, ceil: ceilLobby,  pillar: wpPillar   },
+};
+
+// Márvány-textúra a humanoidhoz (világos kő, szürke erezet)
+function makeMarbleTexture() {
+  const s = 256;
+  const c = document.createElement('canvas'); c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = '#e6e0d4'; x.fillRect(0, 0, s, s);
+  // lágy foltosság
+  for (let i = 0; i < 150; i++) {
+    const r = 8 + Math.random() * 44, gx = Math.random() * s, gy = Math.random() * s;
+    const g = x.createRadialGradient(gx, gy, 0, gx, gy, r);
+    const shade = Math.random() < 0.5 ? '198,192,178' : '255,253,247';
+    g.addColorStop(0, `rgba(${shade},${0.05 + Math.random() * 0.09})`);
+    g.addColorStop(1, `rgba(${shade},0)`);
+    x.fillStyle = g; x.beginPath(); x.arc(gx, gy, r, 0, 6.2832); x.fill();
+  }
+  // erezet
+  x.lineCap = 'round';
+  for (let i = 0; i < 11; i++) {
+    x.beginPath();
+    let px = Math.random() * s, py = Math.random() * s;
+    x.moveTo(px, py);
+    const segs = 4 + (Math.random() * 4 | 0);
+    for (let j = 0; j < segs; j++) {
+      const nx = px + (Math.random() * 2 - 1) * 75, ny = py + (Math.random() * 2 - 1) * 75;
+      const mx2 = (px + nx) / 2 + (Math.random() * 2 - 1) * 32, my2 = (py + ny) / 2 + (Math.random() * 2 - 1) * 32;
+      x.quadraticCurveTo(mx2, my2, nx, ny); px = nx; py = ny;
+    }
+    x.strokeStyle = `rgba(110,106,96,${0.10 + Math.random() * 0.18})`;
+    x.lineWidth = 0.6 + Math.random() * 1.6;
+    x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const marbleTex = makeMarbleTexture();
+
+// Víz anyaga (csak Level 37) — a buildWorld cellánként rak le víz-csempéket
+// a "elöntött" zónákban, így nem mindenhol van víz, csak régiónként (tócsák).
+const waterMat = new THREE.MeshLambertMaterial({
+  color: 0x1f9e8c, transparent: true, opacity: 0.66,
+  side: THREE.DoubleSide, depthWrite: false,
+});
+const waterTileGeo = new THREE.PlaneGeometry(CELL, CELL);
+
+// Száraz cellák megemelt padlója (deck) a vízszinten — így nem látni a víz alá.
+// A pool szélére függőleges perem (curb) kerül, ami lezárja a rést.
+const DECK_H   = 0.55;  // = water.y (Level 37)
+const curbHGeo = new THREE.BoxGeometry(W, DECK_H, T);
+const curbVGeo = new THREE.BoxGeometry(T, DECK_H, W);
+
+// Elöntött-e a cella? Nagy, összefüggő tócsák (5×5 blokk-zaj), nem cellánként szórt.
+function zoneWater(x, z) {
+  const L = LEVELS[currentLevel];
+  if (!L.water || !L.gen.waterChance) return false;
+  const bx = Math.floor(x / 5), bz = Math.floor(z / 5);
+  return posHash(bx, bz, 0x5EA0FF11) < L.gen.waterChance;
+}
+
+// Padlómagasság egy cellában: száraz deck a vízszinten, elöntött cella alján 0.
+function floorHeightAt(cx, cz) {
+  const L = LEVELS[currentLevel];
+  if (L.water && !zoneWater(cx, cz)) return L.water.y;
+  return 0;
+}
+
+let WATER_Y = -100; // aktív vízszint (Level 0-n nincs víz → nagyon lent)
+
+// Téma alkalmazása egy szintre (színek, fény, textúra, víz, HUD)
+function applyLevelTheme(L) {
+  scene.fog.color.setHex(L.fog); scene.fog.density = L.fogD;
+  scene.background.setHex(L.fog);
+  ambLight.color.setHex(L.amb); ambLight.intensity = L.ambI;
+  hemiLight.color.setHex(L.hemiSky); hemiLight.groundColor.setHex(L.hemiGnd); hemiLight.intensity = L.hemiI;
+
+  const tx = L.tex ? TEX[L.tex] : null;
+  wallMat.color.setHex(L.wall);     wallMat.map   = tx ? tx.wall   : null; wallMat.needsUpdate = true;
+  floorMat.color.setHex(L.floor);   floorMat.map  = tx ? tx.floor  : null; floorMat.needsUpdate = true;
+  ceilMat.color.setHex(L.ceil);     ceilMat.map   = tx ? tx.ceil   : null; ceilMat.needsUpdate = true;
+  pillarMat.color.setHex(L.pillar); pillarMat.map = tx ? tx.pillar : null; pillarMat.needsUpdate = true;
+  railMat.color.setHex(L.rail);
+  trimMat.color.setHex(L.trim);
+  for (const pl of LIGHT_POOL) pl.color.setHex(L.lightColor);
+
+  if (L.water) {
+    waterMat.color.setHex(L.water.color); waterMat.opacity = L.water.opacity;
+    WATER_Y = L.water.y;
+  } else {
+    WATER_Y = -100;
+  }
+
+  // HUD szín + felirat
+  document.title = 'Backrooms – Level ' + L.id;
+  const tag = document.getElementById('level-tag');
+  tag.textContent = L.name; tag.style.color = `rgba(${L.ui},0.9)`;
+  document.getElementById('timer').style.color = `rgba(${L.ui},0.7)`;
+  const info = document.getElementById('info'); if (info) info.style.color = `rgba(${L.ui},0.8)`;
 }
 
 // Közös villódzás-szint egy adott fázishoz és időhöz (0.16 = halvány, 1.0 = ég).
@@ -746,14 +993,20 @@ async function buildWorld(onProgress) {
   // SZABADON ÁLLÓ OSZLOP + perem
   const colIM       = new THREE.InstancedMesh(colGeo,        pillarMat, total);
   const colCapIM    = new THREE.InstancedMesh(colCapGeo,     trimMat,   total * 2);
+  // VÍZ-csempék (csak elöntött cellákon) + pool-perem (curb)
+  const waterIM     = new THREE.InstancedMesh(waterTileGeo,  waterMat,  total);
+  const curbHIM     = new THREE.InstancedMesh(curbHGeo,      wallMat,   maxW);
+  const curbVIM     = new THREE.InstancedMesh(curbVGeo,      wallMat,   maxW);
   // egyéb
   const fixIM       = new THREE.InstancedMesh(fixGeo,        fixMat,    total);
   const pillarIM    = new THREE.InstancedMesh(pillarGeo,     pillarMat, total * 4);
 
   [floorIM, ceilIM, wallHIM, wallVIM, wallHHalfIM, wallVHalfIM,
    wallHTopIM, wallVTopIM, winHBotIM, winHTopIM, winVBotIM, winVTopIM,
-   railHIM, railVIM, lintelHIM, lintelVIM, riserHIM, riserVIM, colIM, colCapIM, fixIM, pillarIM
+   railHIM, railVIM, lintelHIM, lintelVIM, riserHIM, riserVIM, colIM, colCapIM,
+   waterIM, curbHIM, curbVIM, fixIM, pillarIM
   ].forEach(m => { m.frustumCulled = false; });
+  const hasWater = !!LEVELS[currentLevel].water;
 
   const dummy = new THREE.Object3D();
   const col   = new THREE.Color();
@@ -762,7 +1015,7 @@ async function buildWorld(onProgress) {
   let whhi = 0, wvhi = 0, whti = 0, wvti = 0;
   let nwhb = 0, nwht = 0, nwvb = 0, nwvt = 0;
   let nrh = 0, nrv = 0, nlh = 0, nlv = 0, nco = 0, ncc = 0;
-  let nrih = 0, nriv = 0;
+  let nrih = 0, nriv = 0, nwi = 0, nch = 0, ncv = 0;
   let fxi = 0, pi = 0;
   const half = CELL / 2;
 
@@ -780,18 +1033,44 @@ async function buildWorld(onProgress) {
       const w  = maze.walls(mx, mz);
       const cellH = zoneCeil(mx, mz);   // cellánkénti mennyezetmagasság
 
+      // Padlómagasság: száraz cella megemelt deck (vízszinten), elöntött cella alján
+      const flooded = hasWater && zoneWater(mx, mz);
+      const fY = (hasWater && !flooded) ? WATER_Y : 0;
+
       // Floor — néhány cella elszíneződött / foltos szőnyeg
-      dummy.position.set(wx, 0, wz);
+      dummy.position.set(wx, fY, wz);
       dummy.rotation.set(-Math.PI / 2, 0, 0);
       dummy.updateMatrix();
       const fIdx = fi++;
       floorIM.setMatrixAt(fIdx, dummy.matrix);
       const fr = posHash(mx, mz, 0x5707F100);
-      if (fr < 0.10)      col.setRGB(0.62, 0.60, 0.52); // sötét nedvesség-folt
+      // padló-foltok csak a NEM csempézett szinteken (Level 0); csempén tiszta marad
+      if (LEVELS[currentLevel].tiled) col.setRGB(1, 1, 1);
+      else if (fr < 0.10) col.setRGB(0.62, 0.60, 0.52); // sötét nedvesség-folt
       else if (fr < 0.18) col.setRGB(0.78, 0.75, 0.64); // halvány elszíneződés
       else if (fr < 0.24) col.setRGB(1.06, 1.02, 0.92); // kifakult világos folt
       else                col.setRGB(1, 1, 1);
       floorIM.setColorAt(fIdx, col);
+
+      // Víz-csempe csak az elöntött zónákban (Level 37) → tócsák, nem mindenhol.
+      // A felszín KICSIT a deck alatt (−0.06), hogy ne legyen egysíkú a deckkel (z-fighting).
+      if (flooded) {
+        dummy.position.set(wx, WATER_Y - 0.06, wz);
+        dummy.rotation.set(-Math.PI / 2, 0, 0);
+        dummy.updateMatrix();
+        waterIM.setMatrixAt(nwi++, dummy.matrix);
+      }
+
+      // Pool-perem (curb): száraz deck éle, amely elöntött cellára néz — lezárja a rést.
+      // A víz felé toljuk fél vastagsággal, hogy a teteje NE fedje át a deck-padlót.
+      if (hasWater && !flooded) {
+        const cy = WATER_Y / 2, o = T / 2;
+        dummy.rotation.set(0, 0, 0);
+        if (zoneWater(mx, mz-1)) { dummy.position.set(wx,         cy, wz - half - o); dummy.updateMatrix(); curbHIM.setMatrixAt(nch++, dummy.matrix); }
+        if (zoneWater(mx, mz+1)) { dummy.position.set(wx,         cy, wz + half + o); dummy.updateMatrix(); curbHIM.setMatrixAt(nch++, dummy.matrix); }
+        if (zoneWater(mx+1, mz)) { dummy.position.set(wx + half + o, cy, wz       ); dummy.updateMatrix(); curbVIM.setMatrixAt(ncv++, dummy.matrix); }
+        if (zoneWater(mx-1, mz)) { dummy.position.set(wx - half - o, cy, wz       ); dummy.updateMatrix(); curbVIM.setMatrixAt(ncv++, dummy.matrix); }
+      }
 
       // Ceiling — cellánkénti magasságon
       dummy.position.set(wx, cellH, wz);
@@ -915,6 +1194,7 @@ async function buildWorld(onProgress) {
     [railHIM, nrh], [railVIM, nrv], [lintelHIM, nlh], [lintelVIM, nlv],
     [riserHIM, nrih], [riserVIM, nriv],
     [colIM, nco], [colCapIM, ncc],
+    [waterIM, nwi], [curbHIM, nch], [curbVIM, ncv],
     [fixIM, fxi], [pillarIM, pi],
   ];
   for (const [m, cnt] of allIM) {
@@ -1264,12 +1544,38 @@ function initAudio() {
 // ═══════════════════════════════════════════════
 //  START
 // ═══════════════════════════════════════════════
-const enterBtn     = document.getElementById('enter-btn');
 const progressWrap = document.getElementById('progress-wrap');
 const progressBar  = document.getElementById('progress-bar');
 const progressLbl  = document.getElementById('progress-label');
 
-enterBtn.addEventListener('click', async () => {
+// ── Best-time (legtovább túlélés) ──
+function fmtTime(s) {
+  if (s == null) return '—:—';
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+function bestKey(id) { return 'backrooms_best_' + id; }
+function getBest(id) { const v = localStorage.getItem(bestKey(id)); return v == null ? null : parseInt(v, 10); }
+function saveBest(id, s) {
+  const b = getBest(id);
+  if (b == null || s > b) { localStorage.setItem(bestKey(id), String(s)); return true; }
+  return false;
+}
+function refreshBest() {
+  for (const id of Object.keys(LEVELS)) {
+    const el = document.getElementById('best-' + id);
+    if (el) el.textContent = 'BEST ' + fmtTime(getBest(id));
+  }
+}
+refreshBest();
+
+let starting = false;
+async function startGame(levelId) {
+  if (starting) return;
+  starting = true;
+  currentLevel = levelId;
+  applyLevelTheme(LEVELS[levelId]);
+  groundY = floorHeightAt(0, 0);   // a spawn padlószintje (deck vagy víz)
+
   if (fsEnabled) {
     const el = document.documentElement;
     if (el.requestFullscreen) el.requestFullscreen();
@@ -1280,11 +1586,11 @@ enterBtn.addEventListener('click', async () => {
     }
   }
   initAudio();
-  enterBtn.disabled = true;
+  document.querySelectorAll('.level-card').forEach(c => c.disabled = true);
   progressWrap.style.display = 'block';
   progressLbl.style.display  = 'block';
 
-  maze.generate(MAZE_R, makeRng(RUN_SEED));
+  maze.generate(MAZE_R, makeRng(RUN_SEED), LEVELS[currentLevel].gen);
 
   // Start garantálás — 3×3-as nyitott szoba (0,0) körül
   for (let dx = -1; dx <= 1; dx++) {
@@ -1320,6 +1626,10 @@ enterBtn.addEventListener('click', async () => {
   if (!isMobile) document.getElementById('click-catcher').requestPointerLock();
   prev = performance.now();
   requestAnimationFrame(loop);
+}
+
+document.querySelectorAll('.level-card').forEach(card => {
+  card.addEventListener('click', () => startGame(parseInt(card.dataset.level, 10)));
 });
 
 // ═══════════════════════════════════════════════
@@ -1393,6 +1703,68 @@ function createBacteria(color = 0x0a0a0a) {
   return g;
 }
 
+// ═══════════════════════════════════════════════
+//  HUMANOID (Level 37) — fehér, arctalan, izmos férfitest
+//  Ugyanazt az anim-interfészt adja (head/arm/body/legs grp), így az AI/animáció
+//  ugyanúgy mozgatja, mint a bacteriát.
+// ═══════════════════════════════════════════════
+function createHumanoid() {
+  const g = new THREE.Group();
+  // sima, kicsit sötétebb fehér; nyurga, elnyújtott (pale crawler hatás)
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd0ccc3, roughness: 0.55, metalness: 0.0 });
+  const ell  = (r, sx, sy, sz) => { const e = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), skin); e.scale.set(sx, sy, sz); return e; };
+  const tcyl = (rt, rb, h) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 14), skin);
+
+  // ── Törzs — nagyon vékony, lapos, nyúlánk ──
+  const bodyGrp = new THREE.Group();
+  bodyGrp.position.y = 1.12;                          // csípő-pivot (magasan → hosszú lábak)
+  const pelvis = ell(0.145, 1.35, 1.05, 0.88); pelvis.position.y = 0.05; bodyGrp.add(pelvis);
+  const waist  = ell(0.130, 1.25, 1.45, 0.82); waist.position.y  = 0.32; bodyGrp.add(waist);
+  const chest  = ell(0.175, 1.55, 1.30, 0.82); chest.position.y  = 0.62; bodyGrp.add(chest);
+  const shL    = ell(0.10, 1, 1, 1);           shL.position.set(-0.30, 0.66, 0); bodyGrp.add(shL);
+  const shR    = ell(0.10, 1, 1, 1);           shR.position.set( 0.30, 0.66, 0); bodyGrp.add(shR);
+  g.add(bodyGrp);
+
+  // ── Fej (kicsi, sima, arctalan ovoid) ──
+  const headGrp = new THREE.Group();
+  headGrp.position.y = 1.92;
+  const neck = tcyl(0.058, 0.075, 0.20); neck.position.y = 0.0; headGrp.add(neck);
+  const head = ell(0.15, 0.9, 1.32, 1.05); head.position.y = 0.26; headGrp.add(head);
+  g.add(headGrp);
+
+  // ── Karok (NAGYON hosszú, vékony — combközépig lógnak) ──
+  function makeArm(side) {
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.30, 1.78, 0);
+    const upper = tcyl(0.060, 0.048, 0.68); upper.position.y = -0.34; arm.add(upper);
+    const fore  = tcyl(0.048, 0.038, 0.66); fore.position.y  = -1.00; arm.add(fore);
+    const hand  = ell(0.058, 0.8, 1.7, 0.5); hand.position.y = -1.40; arm.add(hand);
+    return arm;
+  }
+  const leftArmGrp  = makeArm(-1); g.add(leftArmGrp);
+  const rightArmGrp = makeArm( 1); g.add(rightArmGrp);
+
+  // ── Lábak (hosszú, vékony) ──
+  const legsGrp = new THREE.Group();
+  legsGrp.position.y = 1.12;
+  function makeLeg(side) {
+    const leg = new THREE.Group();
+    leg.position.set(side * 0.12, 0, 0);
+    const thigh = tcyl(0.082, 0.062, 0.60); thigh.position.y = -0.31; leg.add(thigh);
+    const shin  = tcyl(0.058, 0.042, 0.60); shin.position.y  = -0.92; leg.add(shin);
+    const foot  = ell(0.068, 0.9, 0.55, 1.95); foot.position.set(0, -1.22, 0.07); leg.add(foot);
+    return leg;
+  }
+  legsGrp.add(makeLeg(-1)); legsGrp.add(makeLeg(1));
+  g.add(legsGrp);
+
+  const offset = Math.random() * Math.PI * 2;
+  g.userData.anim = { headGrp, leftArmGrp, rightArmGrp, bodyGrp, legsGrp, offset };
+  g.scale.setScalar(1.12);
+
+  return g;
+}
+
 const monsters = [];
 const RESPAWN_DIST = 60; // world unit — ennél messzebb respawnol
 let respawnCooldown = 0;
@@ -1405,7 +1777,7 @@ function spawnOneMonster(cx, cz, chasing = false) {
       if (maze._get(nx, nz) && !columnCells.has(nx + ',' + nz)) { cx = nx; cz = nz; break; }
     }
   }
-  const mesh = createBacteria();
+  const mesh = (LEVELS[currentLevel].monster === 'humanoid') ? createHumanoid() : createBacteria();
   mesh.position.set(cx * CELL, 0, cz * CELL);
   scene.add(mesh);
   monsters.push({ mesh, cx, cz, tx: cx, tz: cz, speed: 0.8, waitT: 0, chasing });
@@ -1666,7 +2038,8 @@ function updateMonsters(dt) {
       }
 
       m.mesh.rotation.y = Math.atan2(dirX, dirZ);
-      m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.012)) * 0.12;
+      m.mesh.position.y = floorHeightAt(Math.round(m.mesh.position.x / CELL), Math.round(m.mesh.position.z / CELL))
+                        + Math.abs(Math.sin(performance.now() * 0.012)) * 0.12;
     } else {
       // Bolyongás
       if (m.waitT > 0) { m.waitT -= dt; continue; }
@@ -1694,7 +2067,8 @@ function updateMonsters(dt) {
         m.mesh.position.x += dx * spd;
         m.mesh.position.z += dz * spd;
         m.mesh.rotation.y = Math.atan2(dx, dz);
-        m.mesh.position.y = Math.abs(Math.sin(performance.now() * 0.004)) * 0.05;
+        m.mesh.position.y = floorHeightAt(Math.round(m.mesh.position.x / CELL), Math.round(m.mesh.position.z / CELL))
+                          + Math.abs(Math.sin(performance.now() * 0.004)) * 0.05;
       }
     }
   }
@@ -1750,7 +2124,12 @@ function checkDeath() {
         const s = Math.floor((performance.now() - timerStart) / 1000);
         const mm = String(Math.floor(s/60)).padStart(2,'0');
         const ss = String(s % 60).padStart(2,'0');
-        document.getElementById('survived-time').textContent = `SURVIVED  ${mm}:${ss}`;
+        const isBest = saveBest(currentLevel, s);
+        const prevBest = getBest(currentLevel);
+        document.getElementById('survived-time').innerHTML =
+          `SURVIVED  ${mm}:${ss}` +
+          (isBest ? '<br><span style="font-size:0.8em;opacity:0.8">NEW BEST!</span>'
+                  : `<br><span style="font-size:0.8em;opacity:0.6">BEST  ${fmtTime(prevBest)}</span>`);
       }
       document.exitPointerLock();
       return;
@@ -1766,9 +2145,10 @@ const right = new THREE.Vector3();
 const SPEED = 4.0;
 const SPRINT_SPEED = 7.5;
 const CROUCH_SPEED = 2.4;   // guggolva lassabb
-const STAND_Y  = 1.72;      // kamera magasság állva
-const CROUCH_Y = 0.95;      // kamera magasság guggolva (átfér a lógó falak alatt)
+const STAND_Y  = 1.72;      // szemmagasság a padló felett állva
+const CROUCH_Y = 0.95;      // szemmagasság guggolva (átfér a lógó falak alatt)
 let crouchH = STAND_Y;      // simán átmegy a kettő közt
+let groundY = 0;            // aktuális padlómagasság (deck/víz) — simán követi
 const STAMINA_MAX  = 10.0; // 10mp sprint
 const STAMINA_DRAIN = 1.0; // 1mp/mp fogyás sprint közben
 const STAMINA_REGEN = 0.25; // 0.25mp/mp töltés → 40mp pihi
@@ -1872,7 +2252,10 @@ function loop() {
     ? `rgba(160,60,40,${0.5 + Math.sin(now * 0.005) * 0.25})`
     : `rgba(200,168,50,${0.45 + pct * 0.45})`;
   if (moving && !dead) {
-    const spd = (crouching ? CROUCH_SPEED : (sprinting ? SPRINT_SPEED : SPEED)) * dt / len;
+    // vízben lassabb gázolás — csak ha tényleg elöntött cellában vagyunk
+    const inWater = WATER_Y > 0 && zoneWater(Math.round(camera.position.x / CELL), Math.round(camera.position.z / CELL));
+    const waterFactor = inWater ? 0.82 : 1.0;
+    const spd = (crouching ? CROUCH_SPEED : (sprinting ? SPRINT_SPEED : SPEED)) * waterFactor * dt / len;
     const nx = camera.position.x + mx * spd;
     const nz = camera.position.z + mz * spd;
     // guggolva át lehet bújni a lógó falak alatt (ducking=true)
@@ -1881,10 +2264,12 @@ function loop() {
     bobT += dt * (sprinting ? 9.0 : 5.5);
   }
 
-  // kamera magasság: simán a guggoló/álló érték felé, + fejmozgás
+  // kamera magasság: padlószint (deck/víz) + szemmagasság + fejmozgás, simán
   const targetY = crouching ? CROUCH_Y : STAND_Y;
   crouchH += (targetY - crouchH) * Math.min(1, dt * 10);
-  camera.position.y = crouchH + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
+  const floorY = floorHeightAt(Math.round(camera.position.x / CELL), Math.round(camera.position.z / CELL));
+  groundY += (floorY - groundY) * Math.min(1, dt * 8);
+  camera.position.y = groundY + crouchH + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
   updateLights(now);
   updateFlicker(now);
