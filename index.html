@@ -320,14 +320,30 @@ function zoneOpen(x, z) {
   return posHash(bx, bz, 0xAA11BB22);
 }
 
-// Faltípus egy adott élhez (0=FULL, 1=HALF_BOT, 2=HANG_TOP)
-// Szobák határán lehet variáns, folyosóban mindig FULL
+// Faltípus egy adott élhez (0=FULL, 1=HALF_BOT, 2=HANG_TOP, 3=WINDOW)
+// FONTOS: egy fal két cella között van megosztva — a típust KANONIKUS él-kulcs
+// alapján sorsoljuk (a két szomszéd közül a kisebb koordinátájú), hogy mindkét
+// oldalról ugyanaz legyen. Különben átfedő, eltérő típusú falak keletkeznek.
+// dir: 0=N, 1=S, 2=E, 3=W
 function wallType(x, z, dir) {
-  if (!maze.isRoom(x, z)) return 0; // folyosó: mindig teljes fal
-  const r = posHash(x * 3 + dir * 100, z * 7 + dir * 200, 0x55AA66BB);
-  if (r < 0.84) return 0;  // 84% FULL
-  if (r < 0.93) return 1;  // 9% HALF_BOT
-  return 2;                 // 7% HANG_TOP
+  // a fal másik oldalán lévő szomszéd cella
+  let bx = x, bz = z, ori;
+  if (dir === 0)      { bz = z - 1; ori = 0; } // észak
+  else if (dir === 1) { bz = z + 1; ori = 0; } // dél
+  else if (dir === 2) { bx = x + 1; ori = 1; } // kelet
+  else                { bx = x - 1; ori = 1; } // nyugat
+
+  // variáns csak ha valamelyik oldal szoba (folyosó mindig teljes fal)
+  if (!maze.isRoom(x, z) && !maze.isRoom(bx, bz)) return 0;
+
+  // kanonikus él-kulcs: H él → kisebb z, V él → kisebb x
+  const kx = ori === 1 ? Math.min(x, bx) : x;
+  const kz = ori === 0 ? Math.min(z, bz) : z;
+  const r = posHash(kx * 3 + ori * 100, kz * 7 + ori * 200, 0x55AA66BB);
+  if (r < 0.78) return 0;  // 78% FULL
+  if (r < 0.87) return 1;  // 9% HALF_BOT (korláttal)
+  if (r < 0.93) return 2;  // 6% HANG_TOP
+  return 3;                 // 7% WINDOW (ablakos fal)
 }
 
 // ═══════════════════════════════════════════════
@@ -501,6 +517,37 @@ const wallVTopGeo  = new THREE.BoxGeometry(T, HT, W);
 const fixGeo    = new THREE.BoxGeometry(1.7, 0.05, 1.7);  // négyzetes fénypanel
 const pillarGeo = new THREE.BoxGeometry(0.28, H, 0.28);
 
+// ── BACKROOMS architektúra extrák ──
+// Szabadon álló oszlop (ikonikus pillér) bázis/fejezet peremmel
+const COL_W     = 0.92;
+const colGeo    = new THREE.BoxGeometry(COL_W, H, COL_W);
+const colCapGeo = new THREE.BoxGeometry(COL_W + 0.24, 0.16, COL_W + 0.24);
+
+// Félfal tetejére kapaszkodó / korlát (fa szín)
+const RAIL_T    = 0.14;
+const railHGeo  = new THREE.BoxGeometry(W, RAIL_T, 0.26);
+const railVGeo  = new THREE.BoxGeometry(0.26, RAIL_T, W);
+
+// Ablakos fal: alsó mellvéd + felső áthidaló, közte nyílás
+const WIN_SILL  = 0.95;   // mellvéd magassága
+const WIN_HEAD  = 0.60;   // felső áthidaló magassága
+const winHBotGeo = new THREE.BoxGeometry(W, WIN_SILL, T);
+const winHTopGeo = new THREE.BoxGeometry(W, WIN_HEAD, T);
+const winVBotGeo = new THREE.BoxGeometry(T, WIN_SILL, W);
+const winVTopGeo = new THREE.BoxGeometry(T, WIN_HEAD, W);
+
+// Ajtó-áthidaló (nyílás fölötti gerenda) — küszöb/soffit hatás
+const LINTEL_H   = 0.85;
+const lintelHGeo = new THREE.BoxGeometry(W, LINTEL_H, T * 2.4);
+const lintelVGeo = new THREE.BoxGeometry(T * 2.4, LINTEL_H, W);
+
+// Anyagok az extrákhoz
+const railMat   = new THREE.MeshLambertMaterial({ color: 0x9c6233 }); // meleg fa kapaszkodó
+const trimMat   = new THREE.MeshLambertMaterial({ color: 0xf2ead0 }); // világos szegély/perem
+
+// Oszlop-cellák halmaza ütközéshez (buildWorld tölti fel)
+const columnCells = new Set();
+
 // Point light POOL — mobil WebGL nem bír sok dinamikus fényt a Lambert
 // shaderben (uniform-limit), ezért csak pár fény van, ami a játékos köré
 // ugrik. A fény-rács 10 cellánként van (world: 10*CELL).
@@ -558,17 +605,34 @@ async function buildWorld(onProgress) {
   // HANG_TOP
   const wallHTopIM  = new THREE.InstancedMesh(wallHTopGeo,   wallMat,   maxW);
   const wallVTopIM  = new THREE.InstancedMesh(wallVTopGeo,   wallMat,   maxW);
+  // WINDOW (ablakos fal: mellvéd + áthidaló)
+  const winHBotIM   = new THREE.InstancedMesh(winHBotGeo,    wallMat,   maxW);
+  const winHTopIM   = new THREE.InstancedMesh(winHTopGeo,    wallMat,   maxW);
+  const winVBotIM   = new THREE.InstancedMesh(winVBotGeo,    wallMat,   maxW);
+  const winVTopIM   = new THREE.InstancedMesh(winVTopGeo,    wallMat,   maxW);
+  // KAPASZKODÓ a félfalakon
+  const railHIM     = new THREE.InstancedMesh(railHGeo,      railMat,   maxW);
+  const railVIM     = new THREE.InstancedMesh(railVGeo,      railMat,   maxW);
+  // AJTÓ-ÁTHIDALÓ (soffit a nyílások felett)
+  const lintelHIM   = new THREE.InstancedMesh(lintelHGeo,    wallMat,   maxW);
+  const lintelVIM   = new THREE.InstancedMesh(lintelVGeo,    wallMat,   maxW);
+  // SZABADON ÁLLÓ OSZLOP + perem
+  const colIM       = new THREE.InstancedMesh(colGeo,        pillarMat, total);
+  const colCapIM    = new THREE.InstancedMesh(colCapGeo,     trimMat,   total * 2);
   // egyéb
   const fixIM       = new THREE.InstancedMesh(fixGeo,        fixMat,    total);
   const pillarIM    = new THREE.InstancedMesh(pillarGeo,     pillarMat, total * 4);
 
   [floorIM, ceilIM, wallHIM, wallVIM, wallHHalfIM, wallVHalfIM,
-   wallHTopIM, wallVTopIM, fixIM, pillarIM
+   wallHTopIM, wallVTopIM, winHBotIM, winHTopIM, winVBotIM, winVTopIM,
+   railHIM, railVIM, lintelHIM, lintelVIM, colIM, colCapIM, fixIM, pillarIM
   ].forEach(m => { m.frustumCulled = false; });
 
   const dummy = new THREE.Object3D();
   let fi = 0, ci = 0, whi = 0, wvi = 0;
   let whhi = 0, wvhi = 0, whti = 0, wvti = 0;
+  let nwhb = 0, nwht = 0, nwvb = 0, nwvt = 0;
+  let nrh = 0, nrv = 0, nlh = 0, nlv = 0, nco = 0, ncc = 0;
   let fxi = 0, pi = 0;
   const half = CELL / 2;
 
@@ -603,12 +667,26 @@ async function buildWorld(onProgress) {
         const t = wallType(mx, mz, dir);
         if (isH) {
           if (t === 0) { dummy.position.set(px, H/2,         pz); dummy.updateMatrix(); wallHIM.setMatrixAt(whi++, dummy.matrix); }
-          else if (t === 1) { dummy.position.set(px, HH/2,        pz); dummy.updateMatrix(); wallHHalfIM.setMatrixAt(whhi++, dummy.matrix); }
+          else if (t === 1) {
+            dummy.position.set(px, HH/2, pz); dummy.updateMatrix(); wallHHalfIM.setMatrixAt(whhi++, dummy.matrix);
+            dummy.position.set(px, HH + RAIL_T/2, pz); dummy.updateMatrix(); railHIM.setMatrixAt(nrh++, dummy.matrix);
+          }
           else if (t === 2) { dummy.position.set(px, H - HT/2,    pz); dummy.updateMatrix(); wallHTopIM.setMatrixAt(whti++, dummy.matrix); }
+          else { // 3 = ablakos fal
+            dummy.position.set(px, WIN_SILL/2, pz);     dummy.updateMatrix(); winHBotIM.setMatrixAt(nwhb++, dummy.matrix);
+            dummy.position.set(px, H - WIN_HEAD/2, pz); dummy.updateMatrix(); winHTopIM.setMatrixAt(nwht++, dummy.matrix);
+          }
         } else {
           if (t === 0) { dummy.position.set(px, H/2,      pz); dummy.updateMatrix(); wallVIM.setMatrixAt(wvi++, dummy.matrix); }
-          else if (t === 1) { dummy.position.set(px, HH/2,     pz); dummy.updateMatrix(); wallVHalfIM.setMatrixAt(wvhi++, dummy.matrix); }
-          else             { dummy.position.set(px, H - HT/2, pz); dummy.updateMatrix(); wallVTopIM.setMatrixAt(wvti++, dummy.matrix); }
+          else if (t === 1) {
+            dummy.position.set(px, HH/2, pz); dummy.updateMatrix(); wallVHalfIM.setMatrixAt(wvhi++, dummy.matrix);
+            dummy.position.set(px, HH + RAIL_T/2, pz); dummy.updateMatrix(); railVIM.setMatrixAt(nrv++, dummy.matrix);
+          }
+          else if (t === 2) { dummy.position.set(px, H - HT/2, pz); dummy.updateMatrix(); wallVTopIM.setMatrixAt(wvti++, dummy.matrix); }
+          else { // 3 = ablakos fal
+            dummy.position.set(px, WIN_SILL/2, pz);     dummy.updateMatrix(); winVBotIM.setMatrixAt(nwvb++, dummy.matrix);
+            dummy.position.set(px, H - WIN_HEAD/2, pz); dummy.updateMatrix(); winVTopIM.setMatrixAt(nwvt++, dummy.matrix);
+          }
         }
       };
       if (w.n) placeWall(true,  wx,        wz - half, 0);
@@ -640,6 +718,26 @@ async function buildWorld(onProgress) {
           pillarIM.setMatrixAt(pi++, dummy.matrix);
         }
       }
+
+      // Ajtó-áthidalók (soffit) szoba-szoba nyílások felett — küszöbhatás
+      dummy.rotation.set(0, 0, 0);
+      const topY = H - LINTEL_H / 2;
+      if (!w.n && maze.isRoom(mx, mz) && maze.isRoom(mx, mz-1) && posHash(mx, mz, 0x1111) < 0.5) {
+        dummy.position.set(wx, topY, wz - half); dummy.updateMatrix(); lintelHIM.setMatrixAt(nlh++, dummy.matrix);
+      }
+      if (!w.w && maze.isRoom(mx, mz) && maze.isRoom(mx-1, mz) && posHash(mx, mz, 0x2222) < 0.5) {
+        dummy.position.set(wx - half, topY, wz); dummy.updateMatrix(); lintelVIM.setMatrixAt(nlv++, dummy.matrix);
+      }
+
+      // Szabadon álló oszlop nyílt szoba-cella közepén (ikonikus backrooms pillér)
+      if (maze.isRoom(mx, mz) && !w.n && !w.s && !w.e && !w.w &&
+          (Math.abs(mx) > 1 || Math.abs(mz) > 1) &&
+          posHash(mx, mz, 0x9753) < 0.18) {
+        dummy.position.set(wx, H/2, wz);        dummy.updateMatrix(); colIM.setMatrixAt(nco++, dummy.matrix);
+        dummy.position.set(wx, 0.08, wz);       dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
+        dummy.position.set(wx, H - 0.08, wz);   dummy.updateMatrix(); colCapIM.setMatrixAt(ncc++, dummy.matrix);
+        columnCells.add(mx + ',' + mz);
+      }
     }
     onProgress((i + BATCH) / cells.length);
     await new Promise(r => requestAnimationFrame(r));
@@ -650,6 +748,9 @@ async function buildWorld(onProgress) {
     [wallHIM, whi], [wallVIM, wvi],
     [wallHHalfIM, whhi], [wallVHalfIM, wvhi],
     [wallHTopIM, whti], [wallVTopIM, wvti],
+    [winHBotIM, nwhb], [winHTopIM, nwht], [winVBotIM, nwvb], [winVTopIM, nwvt],
+    [railHIM, nrh], [railVIM, nrv], [lintelHIM, nlh], [lintelVIM, nlv],
+    [colIM, nco], [colCapIM, ncc],
     [fixIM, fxi], [pillarIM, pi],
   ];
   for (const [m, cnt] of allIM) {
@@ -693,6 +794,13 @@ function canMove(nx, nz, margin = COL_M) {
   if (w.n && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
   if (w.s && w.w && (nx-cx*CELL+half)*(nx-cx*CELL+half) + (nz-cz*CELL-half)*(nz-cz*CELL-half) < cr2) return false;
   if (w.s && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL-half)*(nz-cz*CELL-half) < cr2) return false;
+
+  // Szabadon álló oszlop ütközése
+  if (columnCells.has(cx + ',' + cz)) {
+    const lx = nx - cx * CELL, lz = nz - cz * CELL;
+    const cr = COL_W / 2 + margin;
+    if (Math.abs(lx) < cr && Math.abs(lz) < cr) return false;
+  }
   return true;
 }
 
