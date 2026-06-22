@@ -191,6 +191,17 @@ canvas { display: block; }
   touch-action: none; z-index: 50; user-select: none;
 }
 #sprint-btn.active { background: rgba(200,168,50,0.28); }
+#crouch-btn {
+  position: fixed; bottom: 90px; right: 140px;
+  width: 72px; height: 72px; border-radius: 50%;
+  background: rgba(200,168,50,0.10);
+  border: 1px solid rgba(200,168,50,0.28);
+  color: rgba(200,168,50,0.75); font-size: 8px; letter-spacing: 1px;
+  font-family: monospace; text-align: center; line-height: 1.3;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; z-index: 50; user-select: none;
+}
+#crouch-btn.active { background: rgba(200,168,50,0.28); }
 #look-zone {
   position: fixed; top: 0; right: 0;
   width: 55%; height: 100%;
@@ -241,6 +252,7 @@ canvas { display: block; }
 <div id="mobile-ui">
   <div id="joystick-zone"><div id="joystick-knob"></div></div>
   <div id="sprint-btn">LEFT<br>SHIFT<br>SPRINT</div>
+  <div id="crouch-btn">CROUCH</div>
   <div id="look-zone"></div>
 </div>
 
@@ -286,7 +298,7 @@ canvas { display: block; }
 
 <div id="ui">
   <div id="crosshair"></div>
-  <div id="info">WASD · MOUSE = LOOK · ESC = PAUSE · LEFT SHIFT = SPRINT</div>
+  <div id="info">WASD · MOUSE = LOOK · ESC = PAUSE · LEFT SHIFT = SPRINT · C = CROUCH</div>
 </div>
 <div id="stamina-wrap"><div id="stamina-fill"></div></div>
 
@@ -660,7 +672,9 @@ function updateLights(now) {
       // a rácscellában lévő lámpa állapotát követi — a paneljével SZINKRONBAN
       // (villogó panel csak rácscellában lehet, lásd lightState → így mindig egyezik)
       let inten = zoneDark(cx, cz) ? 0.07 : 0.30;
-      const ls = lightState(cx, cz);
+      // oszlop fölött nincs panel → a fény ott ne villogjon/halott legyen, csak sima
+      let ls = lightState(cx, cz);
+      if (columnCells.has(cx + ',' + cz)) ls = 'on';
       if (ls === 'dead') inten *= 0.12;
       else if (ls === 'flicker') inten *= flickerFromPhase(posHash(cx, cz, 0x7E5) * 6.28, t);
       pl.intensity = inten;
@@ -917,7 +931,7 @@ async function buildWorld(onProgress) {
 const COL_M = 0.52;
 const COL_H = CELL / 2 - 0.08;
 
-function canMove(nx, nz, margin = COL_M) {
+function canMove(nx, nz, margin = COL_M, ducking = false) {
   const lim  = COL_H - margin;
   const reach = CELL / 2 + margin; // max távolság amiben szomszéd fal releváns
   const cx = Math.round(nx / CELL);
@@ -925,21 +939,26 @@ function canMove(nx, nz, margin = COL_M) {
 
   // Aktuális + 4 szomszéd cella fal-ellenőrzése
   // (ez javítja: fal geometriájába belesétálás a szomszéd cella irányából)
+  // ducking=true esetén a LÓGÓ falak (HANG_TOP, típus 2) alatt át lehet bújni —
+  // ez csak a guggoló játékosra igaz, a szörnyre nem (az kerülni kénytelen).
   const checks = [[cx,cz],[cx+1,cz],[cx-1,cz],[cx,cz+1],[cx,cz-1]];
   for (const [ccx,ccz] of checks) {
     const lx = nx - ccx * CELL;
     const lz = nz - ccz * CELL;
     if (Math.abs(lx) > reach || Math.abs(lz) > reach) continue;
     const w = maze.walls(ccx, ccz);
-    if (w.n && lz < -lim) return false;
-    if (w.s && lz >  lim) return false;
-    if (w.w && lx < -lim) return false;
-    if (w.e && lx >  lim) return false;
+    if (w.n && lz < -lim && !(ducking && wallType(ccx, ccz, 0) === 2)) return false;
+    if (w.s && lz >  lim && !(ducking && wallType(ccx, ccz, 1) === 2)) return false;
+    if (w.w && lx < -lim && !(ducking && wallType(ccx, ccz, 3) === 2)) return false;
+    if (w.e && lx >  lim && !(ducking && wallType(ccx, ccz, 2) === 2)) return false;
   }
 
-  // Sarok check az aktuális cellára
+  // Sarok check az aktuális cellára.
+  // A tiltott sarok-sugár margin+0.6 (a játékosnál ~1.12, mint régen), így a nagy
+  // szörny-marginnál (1.1) sem nő el a fél celláig → a szörny nem akad fel sarkokon.
   const half = CELL / 2;
-  const cr2  = (margin * 2.2) * (margin * 2.2);
+  const crc  = margin + 0.6;
+  const cr2  = crc * crc;
   const w = maze.walls(cx, cz);
   if (w.n && w.w && (nx-cx*CELL+half)*(nx-cx*CELL+half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
   if (w.n && w.e && (nx-cx*CELL-half)*(nx-cx*CELL-half) + (nz-cz*CELL+half)*(nz-cz*CELL+half) < cr2) return false;
@@ -1014,11 +1033,13 @@ if (isMobile) document.getElementById('mobile-ui').style.display = 'block';
 // Touch állapot
 const touchMove = { x: 0, z: 0 };
 let touchSprint = false;
+let touchCrouch = false;
 
 if (isMobile) {
   const joyZone  = document.getElementById('joystick-zone');
   const joyKnob  = document.getElementById('joystick-knob');
   const sprintBtn= document.getElementById('sprint-btn');
+  const crouchBtn= document.getElementById('crouch-btn');
   const lookZone = document.getElementById('look-zone');
   const JR = 60; // joystick sugár px
 
@@ -1064,6 +1085,11 @@ if (isMobile) {
   sprintBtn.addEventListener('touchstart', e => { e.preventDefault(); touchSprint = true;  sprintBtn.classList.add('active'); },    { passive: false });
   sprintBtn.addEventListener('touchend',   e => { e.preventDefault(); touchSprint = false; sprintBtn.classList.remove('active'); }, { passive: false });
   sprintBtn.addEventListener('touchcancel',e => { touchSprint = false; sprintBtn.classList.remove('active'); });
+
+  // Guggolás gomb
+  crouchBtn.addEventListener('touchstart', e => { e.preventDefault(); touchCrouch = true;  crouchBtn.classList.add('active'); },    { passive: false });
+  crouchBtn.addEventListener('touchend',   e => { e.preventDefault(); touchCrouch = false; crouchBtn.classList.remove('active'); }, { passive: false });
+  crouchBtn.addEventListener('touchcancel',e => { touchCrouch = false; crouchBtn.classList.remove('active'); });
 
   // Look drag (jobb oldal)
   lookZone.addEventListener('touchstart', e => {
@@ -1372,6 +1398,13 @@ const RESPAWN_DIST = 60; // world unit — ennél messzebb respawnol
 let respawnCooldown = 0;
 
 function spawnOneMonster(cx, cz, chasing = false) {
+  // ne oszlopra spawnoljon (beleakadna) — keress szomszédos szabad cellát
+  if (columnCells.has(cx + ',' + cz)) {
+    const nb = [[cx+1,cz],[cx-1,cz],[cx,cz+1],[cx,cz-1],[cx+1,cz+1],[cx-1,cz-1],[cx+1,cz-1],[cx-1,cz+1]];
+    for (const [nx, nz] of nb) {
+      if (maze._get(nx, nz) && !columnCells.has(nx + ',' + nz)) { cx = nx; cz = nz; break; }
+    }
+  }
   const mesh = createBacteria();
   mesh.position.set(cx * CELL, 0, cz * CELL);
   scene.add(mesh);
@@ -1451,6 +1484,8 @@ function findPath(sx, sz, tx, tz, maxNodes = 1200) {
     for (const [nx, nz] of nbrs) {
       const k = key(nx, nz);
       if (seen.has(k) || !maze._get(nx, nz)) continue;
+      // oszlopos cellát kerüld (kivéve ha az a cél) — különben a középre tartva beleakad
+      if (columnCells.has(k) && !(nx === tx && nz === tz)) continue;
       seen.add(k);
       prev.set(k, [cx, cz]);
       queue.push([nx, nz]);
@@ -1730,6 +1765,10 @@ const fwd   = new THREE.Vector3();
 const right = new THREE.Vector3();
 const SPEED = 4.0;
 const SPRINT_SPEED = 7.5;
+const CROUCH_SPEED = 2.4;   // guggolva lassabb
+const STAND_Y  = 1.72;      // kamera magasság állva
+const CROUCH_Y = 0.95;      // kamera magasság guggolva (átfér a lógó falak alatt)
+let crouchH = STAND_Y;      // simán átmegy a kettő közt
 const STAMINA_MAX  = 10.0; // 10mp sprint
 const STAMINA_DRAIN = 1.0; // 1mp/mp fogyás sprint közben
 const STAMINA_REGEN = 0.25; // 0.25mp/mp töltés → 40mp pihi
@@ -1810,8 +1849,17 @@ function loop() {
 
   const len = Math.sqrt(mx * mx + mz * mz);
   const moving = len > 0.001;
+  const wantCrouch = isMobile ? touchCrouch : keys['KeyC'];
+  let crouching = wantCrouch && !dead;
+  // Ne lehessen felállni, ha épp egy lógó fal alatt vagy (belelógnál) — maradj
+  // guggolva, amíg ki nem lépsz alóla. (Állva nem fér el, guggolva igen.)
+  if (!crouching && !dead &&
+      !canMove(camera.position.x, camera.position.z, COL_M, false) &&
+       canMove(camera.position.x, camera.position.z, COL_M, true)) {
+    crouching = true;
+  }
   const wantSprint = isMobile ? touchSprint : keys['ShiftLeft'];
-  const sprinting = moving && wantSprint && stamina > 0;
+  const sprinting = moving && wantSprint && stamina > 0 && !crouching; // guggolva nincs sprint
   if (sprinting) {
     stamina = Math.max(0, stamina - STAMINA_DRAIN * dt);
   } else {
@@ -1824,15 +1872,19 @@ function loop() {
     ? `rgba(160,60,40,${0.5 + Math.sin(now * 0.005) * 0.25})`
     : `rgba(200,168,50,${0.45 + pct * 0.45})`;
   if (moving && !dead) {
-    const spd = (sprinting ? SPRINT_SPEED : SPEED) * dt / len;
+    const spd = (crouching ? CROUCH_SPEED : (sprinting ? SPRINT_SPEED : SPEED)) * dt / len;
     const nx = camera.position.x + mx * spd;
     const nz = camera.position.z + mz * spd;
-    if (canMove(nx, camera.position.z)) camera.position.x = nx;
-    if (canMove(camera.position.x, nz)) camera.position.z = nz;
+    // guggolva át lehet bújni a lógó falak alatt (ducking=true)
+    if (canMove(nx, camera.position.z, COL_M, crouching)) camera.position.x = nx;
+    if (canMove(camera.position.x, nz, COL_M, crouching)) camera.position.z = nz;
     bobT += dt * (sprinting ? 9.0 : 5.5);
   }
 
-  camera.position.y = 1.72 + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
+  // kamera magasság: simán a guggoló/álló érték felé, + fejmozgás
+  const targetY = crouching ? CROUCH_Y : STAND_Y;
+  crouchH += (targetY - crouchH) * Math.min(1, dt * 10);
+  camera.position.y = crouchH + (moving ? Math.sin(bobT) * (sprinting ? 0.07 : 0.042) : 0);
 
   updateLights(now);
   updateFlicker(now);
