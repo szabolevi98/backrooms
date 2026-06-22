@@ -1710,10 +1710,12 @@ function createBacteria(color = 0x0a0a0a) {
 // ═══════════════════════════════════════════════
 function createHumanoid() {
   const g = new THREE.Group();
-  // sima, kicsit sötétebb fehér; nyurga, elnyújtott (pale crawler hatás)
-  const skin = new THREE.MeshStandardMaterial({ color: 0xd0ccc3, roughness: 0.55, metalness: 0.0 });
+  // teljesen fehér, halvány önfénnyel (a sötétebb térben is dereng); nyurga
+  const skin = new THREE.MeshStandardMaterial({ color: 0xf3f0ea, roughness: 0.5, metalness: 0.0, emissive: 0x2b2b27, emissiveIntensity: 0.6 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.95, metalness: 0.0 });
   const ell  = (r, sx, sy, sz) => { const e = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), skin); e.scale.set(sx, sy, sz); return e; };
   const tcyl = (rt, rb, h) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, 14), skin);
+  const cone = (r, h) => new THREE.Mesh(new THREE.ConeGeometry(r, h, 8), skin);
 
   // ── Törzs — nagyon vékony, lapos, nyúlánk ──
   const bodyGrp = new THREE.Group();
@@ -1729,7 +1731,14 @@ function createHumanoid() {
   const headGrp = new THREE.Group();
   headGrp.position.y = 1.92;
   const neck = tcyl(0.058, 0.075, 0.20); neck.position.y = 0.0; headGrp.add(neck);
-  const head = ell(0.15, 0.9, 1.32, 1.05); head.position.y = 0.26; headGrp.add(head);
+  const head = ell(0.15, 0.92, 1.34, 1.05); head.position.set(0, 0.26, 0.045); headGrp.add(head); // kissé előrenyúló
+  // üres sötét szemgödrök
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), dark);
+  eyeL.position.set(-0.062, 0.30, 0.15); eyeL.scale.set(1, 1.5, 0.7); headGrp.add(eyeL);
+  const eyeR = eyeL.clone(); eyeR.position.x = 0.062; headGrp.add(eyeR);
+  // sötét, kissé tátott száj
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), dark);
+  mouth.position.set(0, 0.12, 0.15); mouth.scale.set(1.0, 1.9, 0.55); headGrp.add(mouth);
   g.add(headGrp);
 
   // ── Karok (NAGYON hosszú, vékony — combközépig lógnak) ──
@@ -1738,7 +1747,15 @@ function createHumanoid() {
     arm.position.set(side * 0.30, 1.78, 0);
     const upper = tcyl(0.060, 0.048, 0.68); upper.position.y = -0.34; arm.add(upper);
     const fore  = tcyl(0.048, 0.038, 0.66); fore.position.y  = -1.00; arm.add(fore);
-    const hand  = ell(0.058, 0.8, 1.7, 0.5); hand.position.y = -1.40; arm.add(hand);
+    const palm  = ell(0.055, 1.0, 0.9, 0.55); palm.position.y = -1.36; arm.add(palm);
+    // hosszú karom-ujjak
+    for (let f = 0; f < 4; f++) {
+      const claw = cone(0.016, 0.17);
+      claw.position.set((f - 1.5) * 0.032, -1.50, 0.015);
+      claw.rotation.x = Math.PI;                 // hegye lefelé
+      claw.rotation.z = (f - 1.5) * 0.12;        // kissé szétterülve
+      arm.add(claw);
+    }
     return arm;
   }
   const leftArmGrp  = makeArm(-1); g.add(leftArmGrp);
