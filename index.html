@@ -272,6 +272,10 @@ canvas { display: block; }
       <span class="setting-box" id="box-fs">✓</span>
       FULLSCREEN
     </label>
+    <label class="setting-row" id="set-mobile">
+      <span class="setting-box" id="box-mobile">✕</span>
+      MOBILE TOUCH CONTROL
+    </label>
   </div>
   <div id="progress-wrap"><div id="progress-bar"></div></div>
   <div id="progress-label">GENERATING…</div>
@@ -1265,12 +1269,20 @@ const keys = {};
 let muted = localStorage.getItem('backrooms_muted') === '1';
 let vhsEnabled = localStorage.getItem('backrooms_vhs') !== '0';
 let fsEnabled = localStorage.getItem('backrooms_fs') !== '0';
+// Mobil touch vezérlés: ha még sosem állították → auto-detekció dönt; egyébként a mentett érték
+let isMobile = localStorage.getItem('backrooms_mobile') !== null
+  ? localStorage.getItem('backrooms_mobile') === '1'
+  : (('ontouchstart' in window) || navigator.maxTouchPoints > 0);
+function applyMobileUI() {
+  document.getElementById('mobile-ui').style.display = isMobile ? 'block' : 'none';
+}
 
 // — settings UI —
 function updateSettingsUI() {
-  document.getElementById('box-sound').textContent = muted ? '✕' : '✓';
-  document.getElementById('box-vhs').textContent   = vhsEnabled ? '✓' : '✕';
-  document.getElementById('box-fs').textContent    = fsEnabled  ? '✓' : '✕';
+  document.getElementById('box-sound').textContent  = muted ? '✕' : '✓';
+  document.getElementById('box-vhs').textContent    = vhsEnabled ? '✓' : '✕';
+  document.getElementById('box-fs').textContent     = fsEnabled  ? '✓' : '✕';
+  document.getElementById('box-mobile').textContent = isMobile ? '✓' : '✕';
 }
 document.getElementById('set-sound').addEventListener('click', () => {
   muted = !muted;
@@ -1287,6 +1299,12 @@ document.getElementById('set-vhs').addEventListener('click', () => {
 document.getElementById('set-fs').addEventListener('click', () => {
   fsEnabled = !fsEnabled;
   localStorage.setItem('backrooms_fs', fsEnabled ? '1' : '0');
+  updateSettingsUI();
+});
+document.getElementById('set-mobile').addEventListener('click', () => {
+  isMobile = !isMobile;
+  localStorage.setItem('backrooms_mobile', isMobile ? '1' : '0');
+  applyMobileUI();
   updateSettingsUI();
 });
 updateSettingsUI();
@@ -1310,16 +1328,18 @@ document.addEventListener('keyup', e => { keys[e.code] = false; });
 
 let yaw = 0, pitch = 0, locked = false, paused = false, started = false;
 
-// ── Mobil detekció ──
-const isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-if (isMobile) document.getElementById('mobile-ui').style.display = 'block';
+// ── Mobil UI láthatóság (isMobile fent dől el: mentett vagy auto-detekció) ──
+applyMobileUI();
 
 // Touch állapot
 const touchMove = { x: 0, z: 0 };
 let touchSprint = false;
 let touchCrouch = false;
 
-if (isMobile) {
+// A touch-kezelőket MINDIG regisztráljuk (a #mobile-ui csak akkor látszik, ha
+// isMobile igaz; rejtett állapotban úgyse kap eseményt) — így a menü-kapcsoló
+// utólag is bekapcsolhatja a touch vezérlést újratöltés nélkül.
+{
   const joyZone  = document.getElementById('joystick-zone');
   const joyKnob  = document.getElementById('joystick-knob');
   const sprintBtn= document.getElementById('sprint-btn');
